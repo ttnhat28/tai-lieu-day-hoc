@@ -1,5 +1,6 @@
-/*! Tài liệu dạy học — thư viện vẽ hình (GEO ENGINE) + xuất PDF (EXPORT) v3.4
- *  Nạp: thẻ script với src = https://cdn.jsdelivr.net/gh/ttnhat28/tai-lieu-day-hoc@v3.4/tldh.js
+/*! Tài liệu dạy học — thư viện vẽ hình (GEO ENGINE) + xuất PDF + tự dựng khung trang v3.5
+ *  Nạp: thẻ script với src = https://cdn.jsdelivr.net/gh/ttnhat28/tai-lieu-day-hoc@v3.5/tldh.js
+ *  Tự nạp MathJax, html-to-image, jsPDF; tự tạo thanh nút + 2 tab (#tab-exam, #tab-solution).
  *  API: Geo.draw / Geo.bbt / Geo.numline / Geo.chart / Geo.tree; switchTab, downloadPDF, downloadPrintHTML
  */
 (function () {
@@ -61,10 +62,17 @@ mjx-container[display="true"]{margin:4px 0!important;overflow-x:auto;overflow-y:
 .pdf-host{position:fixed;left:-12000px;top:0;z-index:-1}
 .pdf-sheet{position:relative;width:680px;display:flow-root;background:#fff;padding:0;margin:0}
 .data-table{border-collapse:collapse;margin:6px auto}.data-table td,.data-table th{border:1px solid #000;padding:3px 10px;text-align:center}.data-table th{background:#f1f5f9}
+.doc h2,.doc h3{font-size:13.5pt;margin:12px 0 6px}
+.doc table:not(.bbt){border-collapse:collapse;margin:6px auto}.doc table:not(.bbt) td,.doc table:not(.bbt) th{border:1px solid #000;padding:3px 8px}
+.doc img{max-width:100%}
+.doc h1{font-size:15.5pt;text-align:center;margin:0 0 6px}
+.doc .header,.doc header{text-align:center;border-bottom:1.5px solid #0f172a;padding-bottom:8px;margin-bottom:12px}
 `;
   (document.head || document.documentElement).appendChild(st);
 })();
-/* ===================== GEO ENGINE v3 (SVG) — CHÉP NGUYÊN VĂN, KHÔNG SỬA ===================== */
+(function () {
+'use strict';
+/* ===================== GEO ENGINE v3.5 (SVG) ===================== */
 const Geo = (() => {
   const NS = 'http://www.w3.org/2000/svg';
   const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
@@ -78,7 +86,7 @@ const Geo = (() => {
   const el = (tag, at, parent) => { const e = document.createElementNS(NS, tag); for (const k in at) e.setAttribute(k, at[k]); if (parent) parent.appendChild(e); return e; };
   const pathD = pts => 'M' + pts.map(p => (+p[0]).toFixed(2) + ' ' + (+p[1]).toFixed(2)).join(' L');
   const FONT = '"Times New Roman", Times, serif';
-  const host$ = t => typeof t === 'string' ? document.getElementById(t) : t;
+  const host$ = t => { let h = typeof t === 'string' ? document.getElementById(t) : t; if (h && (h.tagName === 'CANVAS' || h.tagName === 'svg' || h.tagName === 'IMG')) { const d = document.createElement('div'); d.id = h.id; d.className = 'figure-box'; h.replaceWith(d); h = d; } return h; };
   const fail = (h, e) => { console.error(e); if (h) h.innerHTML = '<div style="color:#b91c1c;font-size:11pt">⚠ Lỗi vẽ hình: ' + String(e && e.message || e).replace(/</g, '&lt;') + '</div>'; };
   // Chữ có chỉ số: R_1, U_{AB}, x^2, F_{ms}
   function rich(t, txt, size) {
@@ -151,7 +159,50 @@ const Geo = (() => {
     console.warn('Geo: không hiểu phép dựng', op); return null;
   }
 
-  function draw(target, cfg) { const h = host$(target); if (!h) { console.warn('Geo: không thấy', target); return; } try { return draw_(h, cfg); } catch (e) { fail(h, e); } }
+  // ---- v3.5: chịu lỗi cú pháp do AI tự chế ----
+  const pending = [];
+  const pairName = x => Array.isArray(x) ? x.join('') : String(x).replace(/[^A-Za-z0-9_']/g, '');
+  function normalize(cfg) {
+    cfg = Object.assign({}, cfg || {});
+    if (!cfg.P && cfg.points) cfg.P = cfg.points;
+    if (!cfg.P && cfg.pts && !Array.isArray(cfg.pts)) cfg.P = cfg.pts;
+    const P = {};
+    for (const k in (cfg.P || {})) { let v = cfg.P[k]; if (v && !Array.isArray(v) && typeof v === 'object') v = 'z' in v ? [v.x, v.y, v.z] : [v.x, v.y]; P[k] = v; }
+    cfg.P = P;
+    const vals = Object.values(P).filter(Array.isArray), flat = vals.length && vals.every(v => v.length === 2);
+    const solidE = (cfg.solid || cfg.edges || cfg.lines || []).map(pairName), dashE = (cfg.dashed || cfg.hidden || cfg.dash || []).map(pairName);
+    if (Array.isArray(cfg.rightAngles)) cfg.right = (cfg.right || []).concat(cfg.rightAngles.map(pairName));
+    if (Array.isArray(cfg.angles)) cfg.angles = cfg.angles.map(a => typeof a === 'string' ? a : Object.assign({}, a, { a: a.a || pairName(a.pts || a.points || a.at || '') }));
+    if (typeof cfg.solids === 'string') cfg.solids = [cfg.solids];
+    if (flat && cfg.mode !== '2d' && (solidE.length || dashE.length) && !cfg.solids) {
+      // AI vẽ tay bằng tọa độ pixel 2D: giữ đúng nét liền/nét đứt nó chỉ định
+      cfg.mode = '2d'; const Q = {}; for (const k in P) Q[k] = typeof P[k] === 'string' ? P[k] : [P[k][0], -P[k][1]]; cfg.P = Q;
+      cfg.segs = (cfg.segs || []).concat(solidE.map(s => ({ s, dash: false })), dashE.map(s => ({ s, dash: true })));
+      delete cfg.axes;
+    } else if (!flat && !cfg.solids && !cfg.round && cfg.mode !== '2d' && (solidE.length || dashE.length)) {
+      // tọa độ 3D nhưng chỉ liệt kê cạnh: lấy bao lồi các đỉnh làm khối để engine tự tính nét khuất
+      const names = [...new Set(solidE.concat(dashE).join('').match(/_[A-Za-z][0-9]*'*|[A-Z][0-9]*'*/g) || [])].filter(n => Array.isArray(P[n]) && P[n].length === 3);
+      if (names.length >= 4) cfg.solids = [names.join('')];
+      cfg.segs = (cfg.segs || []).concat(solidE, dashE);
+    }
+    if (cfg.labels && !Array.isArray(cfg.labels) && Object.values(cfg.labels).some(v => v && typeof v === 'object')) delete cfg.labels;
+    ['points', 'solid', 'dashed', 'hidden', 'edges', 'lines', 'rightAngles'].forEach(k => delete cfg[k]);
+    return cfg;
+  }
+  function hostFor(target) {
+    let h = host$(target);
+    if (h && h.tagName === 'CANVAS') { const d = document.createElement('div'); d.id = h.id; d.className = 'figure-box'; h.replaceWith(d); h = d; }
+    if (h && h.tagName === 'svg') { const d = document.createElement('div'); d.id = h.id; d.className = 'figure-box'; h.replaceWith(d); h = d; }
+    return h;
+  }
+  function draw(target, cfg) {
+    const h = hostFor(target);
+    if (!h) { pending.push([target, cfg]); return; }
+    if (!h.classList.contains('figure-box') && !h.querySelector('svg')) h.classList.add('figure-box');
+    h.innerHTML = '';
+    try { return draw_(h, normalize(cfg)); } catch (e) { fail(h, e); }
+  }
+  function _flush() { const q = pending.splice(0); q.forEach(([t, c]) => { if (host$(t)) draw(t, c); else console.warn('Geo: không thấy', t); }); }
   function draw_(host, cfg) {
     const is2d = cfg.mode === '2d'; let SCL = cfg.scale || [1, 1, 1];
     const conv0 = p => is2d ? [p[0], 0, p[1]] : (cfg.oxyz ? [p[1], -p[0], p[2]] : p.slice(0, 3));
@@ -546,22 +597,25 @@ const Geo = (() => {
       o += `<text x="${n.x}" y="${n.y}" text-anchor="middle" dominant-baseline="central" font-style="italic">${n.t}</text>`; if (n.end) o += `<text x="${n.x + 22}" y="${n.y}" dominant-baseline="central" font-size="12.5">${n.end}</text>`; };
     put(root); h.innerHTML = o + '</svg>'; } catch (e) { fail(h, e); } }
 
-  return { draw, bbt, numline, chart, tree, VERSION: '3.4' };
+  return { draw, bbt, numline, chart, tree, _flush, VERSION: '3.5' };
 })();
 /* ===================== HẾT GEO ENGINE ===================== */
 
-/* ===================== EXPORT v2 (Tab + PDF + bản in) — CHÉP NGUYÊN VĂN, KHÔNG SỬA ===================== */
+/* ===================== EXPORT v2 (Tab + PDF + bản in) — v3.5 ===================== */
 const PAGE = { w: 210, h: 297, mt: 12, mb: 14, ml: 15, mr: 15 }, MM = 96 / 25.4;
 const CW = Math.round((PAGE.w - PAGE.ml - PAGE.mr) * MM), CH = Math.floor((PAGE.h - PAGE.mt - PAGE.mb) * MM);
 
 function switchTab(t) {
-  document.getElementById('tab-exam').classList.toggle('tab-hidden', t !== 'exam');
-  document.getElementById('tab-solution').classList.toggle('tab-hidden', t !== 'solution');
-  document.getElementById('btn-exam').classList.toggle('active', t === 'exam');
-  document.getElementById('btn-solution').classList.toggle('active', t === 'solution');
+  t = /^(sol|solution|giai|loi-?giai|dap-?an|answer|2)$/i.test(String(t)) ? 'solution' : 'exam';
+  const ex = document.getElementById('tab-exam'), so = document.getElementById('tab-solution');
+  if (ex) ex.classList.toggle('tab-hidden', t !== 'exam' && !!so);
+  if (so) so.classList.toggle('tab-hidden', t !== 'solution');
+  const be = document.getElementById('btn-exam'), bs = document.getElementById('btn-solution');
+  if (be) be.classList.toggle('active', t === 'exam'); if (bs) bs.classList.toggle('active', t === 'solution');
 }
-const activeTab = () => document.getElementById('tab-solution').classList.contains('tab-hidden') ? 'exam' : 'solution';
-const fileTitle = t => (t === 'exam' ? EXAM_TITLE : EXAM_TITLE + ' - Đáp án và lời giải chi tiết').replace(/[\\/:*?"<>|]/g, ' ').trim();
+const activeTab = () => { const so = document.getElementById('tab-solution'); return so && !so.classList.contains('tab-hidden') ? 'solution' : 'exam'; };
+const pageTitle = () => { try { if (typeof EXAM_TITLE === 'string' && EXAM_TITLE.trim()) return EXAM_TITLE; } catch (e) {} const h = document.querySelector('#tab-exam h1'); return (h && h.textContent.trim()) || document.title || 'De thi'; };
+const fileTitle = t => (t === 'exam' ? pageTitle() : pageTitle() + ' - Đáp án và lời giải chi tiết').replace(/[\\/:*?"<>|]/g, ' ').trim();
 
 async function prepareExport() {
   try { if (window.MathJax && MathJax.startup && MathJax.startup.promise) { await MathJax.startup.promise; await MathJax.typesetPromise(); } } catch (e) { console.warn(e); }
@@ -594,11 +648,12 @@ function paginate(target) {
 }
 
 async function downloadPDF(target, btn) {
+  target = /^(sol|solution|giai|loi-?giai|dap-?an|answer|2)$/i.test(String(target)) ? 'solution' : 'exam';
   const old = btn ? btn.innerHTML : '', say = t => { if (btn) btn.innerHTML = t; };
   if (btn) btn.disabled = true; say('⏳ Đang chuẩn bị...');
   let host = null;
   try {
-    switchTab(target); await prepareExport();
+    switchTab(target); await prepareExport(); await ensurePdfLibs();
     if (!window.htmlToImage || !window.jspdf) throw new Error('Chưa tải được thư viện xuất PDF');
     const pg = paginate(target); host = pg.host;
     const pdf = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true });
@@ -622,7 +677,7 @@ async function downloadPDF(target, btn) {
 
 // Dự phòng: file HTML đã chia trang sẵn, mở bằng Chrome/Edge → Ctrl+P → Lưu PDF (chữ & hình vector)
 async function downloadPrintHTML(target) {
-  target = target || activeTab(); await prepareExport();
+  target = target ? (/^(sol|solution|giai|loi-?giai|dap-?an|answer|2)$/i.test(String(target)) ? 'solution' : 'exam') : activeTab(); await prepareExport();
   const pg = paginate(target); pg.host.querySelectorAll('mjx-assistive-mml').forEach(x => x.remove());
   const body = pg.sheets.map(s => s.outerHTML).join('\n'); pg.host.remove();
   const mj = document.getElementById('MJX-SVG-styles'), css = document.getElementById('doc-style').textContent + (mj ? mj.textContent : ''), title = fileTitle(target);
@@ -639,4 +694,135 @@ ${body}<script>addEventListener('load',()=>setTimeout(()=>print(),700))<\/script
 }
 /* ===================== HẾT EXPORT ===================== */
 
-window.Geo = Geo;
+/* ===================== TỰ DỰNG KHUNG + CHỊU LỖI (v3.5) ===================== */
+const TL = { switchTab, downloadPDF, downloadPrintHTML };
+const CDN = {
+  mj: 'https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js',
+  h2i: 'https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js',
+  pdf: 'https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js'
+};
+const loaded = {};
+function loadScript(url, test) {
+  if (test()) return Promise.resolve();
+  if (loaded[url]) return loaded[url];
+  return (loaded[url] = new Promise(res => {
+    const s = document.createElement('script'); s.src = url; s.async = true;
+    s.onload = () => res(); s.onerror = () => res();
+    document.head.appendChild(s);
+  }));
+}
+const hasScript = re => [...document.scripts].some(s => re.test(s.src || ''));
+const ensurePdfLibs = () => Promise.all([
+  loadScript(CDN.h2i, () => !!window.htmlToImage || hasScript(/html-to-image/i) && !!window.htmlToImage),
+  loadScript(CDN.pdf, () => !!window.jspdf)
+]);
+function ensureMathJax() {
+  if (window.MathJax && window.MathJax.typesetPromise) return;
+  if (hasScript(/mathjax/i)) return;
+  if (!window.MathJax || typeof window.MathJax !== 'object' || !window.MathJax.tex) {
+    window.MathJax = { tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] }, svg: { fontCache: 'none' } };
+  } else { window.MathJax.svg = Object.assign({}, window.MathJax.svg, { fontCache: 'none' }); }
+  loadScript(CDN.mj, () => false);
+}
+
+// ---- Tìm 2 phần Đề / Lời giải dù Gemini đặt tên khác ----
+const EXAM_IDS = ['tab-exam', 'exam', 'tab-de', 'de-thi', 'dethi', 'de', 'de-bai', 'debai', 'tab-1', 'tab1', 'exam-tab', 'tab-de-thi'];
+const SOL_IDS = ['tab-solution', 'tab-sol', 'solution', 'sol', 'tab-loi-giai', 'loi-giai', 'loigiai', 'giai', 'dap-an', 'dapan', 'tab-dap-an', 'tab-2', 'tab2', 'solution-tab', 'answer', 'answers'];
+const byIds = ids => { for (const id of ids) { const e = document.getElementById(id); if (e) return e; } return null; };
+function findParts() {
+  let ex = byIds(EXAM_IDS), so = byIds(SOL_IDS);
+  if (!ex) ex = document.querySelector('[data-tab="exam"],[data-tab="de"]');
+  if (!so) so = document.querySelector('[data-tab="solution"],[data-tab="sol"],[data-tab="giai"]');
+  if (ex && so && (ex.contains(so) || so.contains(ex))) so = null;
+  return { ex, so };
+}
+const isOurBar = b => b && b.id === 'tldh-toolbar';
+function stripForeignUI() {
+  // gỡ <style> tự chế (giữ CSS của thư viện và của MathJax)
+  document.querySelectorAll('style').forEach(s => { if (s.id !== 'doc-style' && !/^MJX/i.test(s.id || '')) s.remove(); });
+  document.querySelectorAll('link[rel="stylesheet"]').forEach(l => { if (!/mathjax/i.test(l.href)) l.remove(); });
+  // gỡ thanh nút tự chế (nút gọi switchTab / print / tải PDF)
+  const re = /switchTab|showTab|openTab|print\s*\(|downloadPDF|downloadPrintHTML|exportPDF|html2pdf/i;
+  [...document.querySelectorAll('button,a,[onclick]')].forEach(b => {
+    if (b.closest('#tldh-toolbar')) return;
+    const oc = (b.getAttribute('onclick') || '') + ' ' + (b.id || '') + ' ' + (b.className || '');
+    if (re.test(oc) || /^(btn|tab)-(exam|sol|solution|de|giai)/i.test(b.id || '') || /tab-btn|tabs?-button|print-btn/i.test(b.className || '')) {
+      const p = b.parentElement; b.remove();
+      if (p && p !== document.body && !p.querySelector('*:not(br)') && !p.textContent.trim()) p.remove();
+    }
+  });
+  document.querySelectorAll('.toolbar,.tabs,.tab-bar,.tab-buttons,.nav-tabs').forEach(t => { if (!isOurBar(t) && !t.textContent.trim()) t.remove(); });
+}
+function asSection(el, id) {
+  if (!el) return null;
+  let sec;
+  if (el.tagName === 'SECTION' && el.id === id && el.children.length === 1 && el.firstElementChild.classList.contains('doc')) sec = el;
+  else {
+    sec = document.createElement('section');
+    const doc = el.classList.contains('doc') ? el : (el.querySelector(':scope > .doc') && el.children.length === 1 ? el.firstElementChild : null);
+    const inner = document.createElement('div'); inner.className = 'doc';
+    const src = doc || el;
+    while (src.firstChild) inner.appendChild(src.firstChild);
+    sec.appendChild(inner);
+    el.parentNode.insertBefore(sec, el); el.remove();
+    sec.id = id;
+  }
+  sec.className = 'paper'; sec.removeAttribute('style'); sec.hidden = false;
+  return sec;
+}
+function buildToolbar(hasSol) {
+  document.querySelectorAll('#tldh-toolbar').forEach(x => x.remove());
+  const bar = document.createElement('div'); bar.className = 'toolbar'; bar.id = 'tldh-toolbar';
+  const mk = (txt, cls, id, fn) => { const b = document.createElement('button'); b.type = 'button'; b.innerHTML = txt; if (cls) b.className = cls; if (id) b.id = id; b.addEventListener('click', e => { e.preventDefault(); fn(b); }); bar.appendChild(b); return b; };
+  mk('1. Đề thi [TTN]', 'active', 'btn-exam', () => TL.switchTab('exam'));
+  if (hasSol) mk('2. Đáp án &amp; Lời giải chi tiết', '', 'btn-solution', () => TL.switchTab('solution'));
+  mk('⬇ Tải PDF Đề thi', 'b-exam', '', b => TL.downloadPDF('exam', b));
+  if (hasSol) mk('⬇ Tải PDF Đáp án &amp; Giải chi tiết', 'b-sol', '', b => TL.downloadPDF('solution', b));
+  mk('📄 Tải bản in HTML (Dự phòng)', 'b-html', '', () => TL.downloadPrintHTML());
+  document.body.insertBefore(bar, document.body.firstChild);
+}
+function callPageDrawers() {
+  // Gemini đôi khi chỉ vẽ hình trong hàm riêng (drawFigures…) được gọi lúc chuyển tab
+  const done = new Set();
+  Object.keys(window).forEach(k => {
+    if (!/^(draw|render|init|ve)/i.test(k) || done.has(k)) return;
+    const f = window[k]; if (typeof f !== 'function' || f.length) return;
+    let src = ''; try { src = Function.prototype.toString.call(f); } catch (e) { return; }
+    if (!/Geo\.(draw|bbt|numline|chart|tree)/.test(src) || /\[native code\]/.test(src)) return;
+    done.add(k); try { f(); } catch (e) { console.warn('tldh:', k, e); }
+  });
+}
+function boot() {
+  if (window.__tldhBooted) return; window.__tldhBooted = true;
+  ensureMathJax(); ensurePdfLibs();
+  stripForeignUI();
+  let { ex, so } = findParts();
+  if (!ex) {
+    // không có khung: toàn bộ nội dung trang là phần Đề
+    ex = document.createElement('div');
+    [...document.body.childNodes].forEach(n => { if (!(n.nodeType === 1 && (n.tagName === 'SCRIPT' || n.id === 'tldh-toolbar'))) ex.appendChild(n); });
+    document.body.insertBefore(ex, document.body.firstChild);
+  }
+  // gỡ các vỏ bọc ngoài (container, wrapper…) để 2 tờ giấy nằm ngay trong body
+  const exS = asSection(ex, 'tab-exam'), soS = asSection(so, 'tab-solution');
+  [exS, soS].forEach(s => { if (s && s.parentElement !== document.body) document.body.appendChild(s); });
+  const lead = [];
+  [...document.body.children].forEach(c => {
+    if (c === exS || c === soS || c.tagName === 'SCRIPT' || c.id === 'tldh-toolbar' || /^MJX|^MathJax/i.test(c.id || '')) return;
+    if (!c.textContent.trim() && !c.querySelector('svg,img,canvas,table')) c.remove(); else lead.push(c);
+  });
+  if (exS) { const d = exS.firstElementChild, f = d.firstChild; lead.forEach(c => d.insertBefore(c, f)); }
+  if (soS) soS.classList.add('tab-hidden');
+  buildToolbar(!!soS);
+  window.switchTab = TL.switchTab; window.downloadPDF = TL.downloadPDF; window.downloadPrintHTML = TL.downloadPrintHTML;
+  callPageDrawers();
+  Geo._flush();
+  if (window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise().catch(() => {});
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else setTimeout(boot, 0);
+window.addEventListener('load', () => { window.switchTab = TL.switchTab; window.downloadPDF = TL.downloadPDF; window.downloadPrintHTML = TL.downloadPrintHTML; });
+/* ===================== HẾT PHẦN TỰ DỰNG ===================== */
+
+window.Geo = Geo; window.TLDH = TL;
+window.switchTab = TL.switchTab; window.downloadPDF = TL.downloadPDF; window.downloadPrintHTML = TL.downloadPrintHTML;
+})();
