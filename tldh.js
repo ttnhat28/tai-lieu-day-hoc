@@ -2544,3 +2544,18 @@ table{width:100%;max-width:100%!important;table-layout:fixed;word-wrap:break-wor
   setTimeout(initEditorUI, 50);
   setTimeout(initEditorUI, 400);
 })();
+(function () {
+  const pin = () => document.querySelectorAll('body > div').forEach(el => {
+    if (el.textContent && el.textContent.includes('Chỉnh sửa & Vẽ hình')) {
+      Object.assign(el.style, {
+        position: 'fixed', top: '58px', right: '16px',
+        left: 'auto', bottom: 'auto', zIndex: '9999',
+        maxWidth: '460px', boxShadow: '0 10px 25px rgba(15,23,42,0.18)'
+      });
+    }
+  });
+  const init = () => new MutationObserver(pin).observe(document.body, {
+    childList: true, subtree: true, attributes: true, attributeFilter: ['style']
+  });
+  document.body ? init() : document.addEventListener('DOMContentLoaded', init);
+})();
