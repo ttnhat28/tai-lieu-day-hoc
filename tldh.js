@@ -838,6 +838,8 @@ mjx-container[jax="SVG"]{max-width:100%!important;overflow:visible!important}
 mjx-container[jax="SVG"][display="true"]{display:block!important;width:100%!important;margin:6px 0!important}
 mjx-container[jax="SVG"] svg,.figure-box svg,.figure-box img{max-width:100%!important;height:auto!important}
 table{width:100%;max-width:100%!important;table-layout:fixed;word-wrap:break-word}
+#btn-fig-edit{background:#fff;color:#1d4ed8;border:1px solid #93c5fd}
+#btn-fig-edit:hover{background:#eff6ff}
 #btn-fig-edit.active{background:#2563eb!important;color:#fff!important;border-color:#1d4ed8!important}
 .fig-edit-active .figure-box{outline:1.5px dashed #93c5fd;outline-offset:3px;border-radius:6px;position:relative;cursor:crosshair;min-height:140px}
 .fig-edit-active .figure-box svg{overflow:visible!important}
@@ -846,14 +848,14 @@ table{width:100%;max-width:100%!important;table-layout:fixed;word-wrap:break-wor
 .fig-edit-active .figure-box.fe-zoomed svg{max-width:none!important;height:auto!important}
 .fig-edit-active .figure-box svg text{cursor:grab;user-select:none}
 .fig-edit-active .figure-box svg text:hover{fill:#2563eb}
-#fig-editor-bar{position:fixed;bottom:14px;right:14px;z-index:9999;background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 10px 28px rgba(15,23,42,.2);padding:10px 12px;font:12.5px/1.4 system-ui,-apple-system,sans-serif;color:#1e293b;display:none;max-width:440px}
-#fig-editor-bar.open{display:block}
-#fig-editor-bar .fe-title{font-weight:700;color:#1d4ed8;margin-bottom:5px;display:flex;justify-content:space-between;align-items:center}
+#fig-editor-bar{position:fixed!important;top:58px;right:16px;z-index:99999!important;background:#fff!important;border:1px solid #cbd5e1!important;border-radius:10px!important;box-shadow:0 10px 28px rgba(15,23,42,.22)!important;padding:10px 12px!important;font:12.5px/1.4 system-ui,-apple-system,sans-serif!important;color:#1e293b!important;display:none;width:430px;max-width:calc(100vw - 24px)}
+#fig-editor-bar.open{display:block!important}
+#fig-editor-bar .fe-title{font-weight:700;color:#1d4ed8;margin-bottom:5px;display:flex;justify-content:space-between;align-items:center;cursor:move;user-select:none;padding-bottom:4px;border-bottom:1px solid #e2e8f0}
 #fig-editor-bar .fe-hint{font-size:11px;color:#475569;margin-bottom:7px;line-height:1.35}
 #fig-editor-bar .fe-row{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;align-items:center}
-#fig-editor-bar button,#fig-editor-bar select{border:1px solid #cbd5e1;background:#f8fafc;color:#0f172a;border-radius:6px;padding:4px 7px;font-size:11.5px;cursor:pointer}
+#fig-editor-bar button,#fig-editor-bar select{border:1px solid #cbd5e1;background:#f8fafc;color:#0f172a;border-radius:6px;padding:4px 7px;font-size:11.5px;cursor:pointer;line-height:1.2}
 #fig-editor-bar button:hover,#fig-editor-bar select:hover{background:#e2e8f0}
-#fig-editor-bar button.fe-on{background:#2563eb;color:#fff;border-color:#1d4ed8}
+#fig-editor-bar button.fe-on{background:#2563eb!important;color:#fff!important;border-color:#1d4ed8!important}
 #fig-editor-bar button.fe-danger{color:#b91c1c;border-color:#fecaca;background:#fef2f2}
 #fig-editor-bar .fe-swatch{width:18px;height:18px;padding:0;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px #94a3b8}
 #fe-zoom-val{font-weight:600;min-width:38px;text-align:center;font-size:11.5px;color:#334155}
@@ -861,8 +863,8 @@ table{width:100%;max-width:100%!important;table-layout:fixed;word-wrap:break-wor
 `;
 
   const EDITOR_HTML = `
-<div id="fig-editor-bar">
-  <div class="fe-title"><span>✏️ Chỉnh sửa & Vẽ hình</span><button onclick="toggleFigEditor(false)" style="padding:2px 6px">✕</button></div>
+<div id="fig-editor-bar" style="position:fixed;top:58px;right:16px;z-index:99999;background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 10px 28px rgba(15,23,42,.22);padding:10px 12px;width:430px;max-width:calc(100vw - 24px);display:none">
+  <div class="fe-title" title="Kéo thanh tiêu đề này để di chuyển bảng"><span>✏️ Chỉnh sửa &amp; Vẽ hình (kéo để di chuyển)</span><button onclick="toggleFigEditor(false)" style="padding:2px 6px">✕</button></div>
   <div class="fe-hint">• <b>Chọn/Kéo:</b> kéo trong lòng hình để kéo cả khối; kéo đỉnh, cạnh hoặc nhãn chữ; click cạnh đổi liền ↔ đứt<br>• <b>Kéo khối:</b> kéo bất kì cạnh/điểm nào để di chuyển toàn bộ khối liên thông</div>
   <div class="fe-row">
     <button id="fe-mode-select" class="fe-on" onclick="setFigTool('select')">🖱️ Chọn/Kéo</button>
@@ -921,12 +923,18 @@ table{width:100%;max-width:100%!important;table-layout:fixed;word-wrap:break-wor
   </div>
 </div>`;
 
-  if (!document.getElementById('fig-editor-style') && document.head) {
-    const st = document.createElement('style');
-    st.id = 'fig-editor-style';
-    st.textContent = EDITOR_CSS;
-    document.head.appendChild(st);
+  function ensureEditorStyle() {
+    const parent = document.head || document.documentElement;
+    if (!parent) return;
+    let st = document.getElementById('fig-editor-style');
+    if (!st) {
+      st = document.createElement('style');
+      st.id = 'fig-editor-style';
+      st.textContent = EDITOR_CSS;
+      parent.appendChild(st);
+    }
   }
+  ensureEditorStyle();
 
   /* --- 1. Geo.draw 2D Auto-Resolver & Fallback Renderer --- */
   if (window.Geo && !window.Geo._v36Patched) {
@@ -2112,13 +2120,18 @@ table{width:100%;max-width:100%!important;table-layout:fixed;word-wrap:break-wor
   }
 
   window.toggleFigEditor = function(force) {
+    ensureEditorStyle();
+    initEditorUI();
     state.active = typeof force === 'boolean' ? force : !state.active;
     state.pendingNode = null; clearSelection();
     document.body.classList.toggle('fig-edit-active', state.active);
     const btnEdit = document.getElementById('btn-fig-edit');
     if (btnEdit) btnEdit.classList.toggle('active', state.active);
     const bar = document.getElementById('fig-editor-bar');
-    if (bar) bar.classList.toggle('open', state.active);
+    if (bar) {
+      bar.classList.toggle('open', state.active);
+      bar.style.display = state.active ? 'block' : 'none';
+    }
     if (state.active) {
       const boxes = document.querySelectorAll('.figure-box');
       boxes.forEach(mountBox);
@@ -2430,20 +2443,67 @@ table{width:100%;max-width:100%!important;table-layout:fixed;word-wrap:break-wor
     }
   };
 
+  function makeBarDraggable(bar) {
+    const handle = bar.querySelector('.fe-title');
+    if (!handle || handle.dataset.dragBound === '1') return;
+    handle.dataset.dragBound = '1';
+    handle.addEventListener('pointerdown', ev => {
+      if (ev.target.closest('button')) return;
+      ev.preventDefault();
+      const rect = bar.getBoundingClientRect();
+      const offX = ev.clientX - rect.left, offY = ev.clientY - rect.top;
+      bar.style.right = 'auto';
+      bar.style.bottom = 'auto';
+      bar.style.left = rect.left + 'px';
+      bar.style.top = rect.top + 'px';
+      handle.setPointerCapture(ev.pointerId);
+      const onMove = mv => {
+        const maxL = Math.max(8, window.innerWidth - bar.offsetWidth - 8);
+        const maxT = Math.max(8, window.innerHeight - bar.offsetHeight - 8);
+        bar.style.left = Math.min(maxL, Math.max(8, mv.clientX - offX)) + 'px';
+        bar.style.top = Math.min(maxT, Math.max(8, mv.clientY - offY)) + 'px';
+      };
+      const onUp = () => {
+        handle.removeEventListener('pointermove', onMove);
+        handle.removeEventListener('pointerup', onUp);
+      };
+      handle.addEventListener('pointermove', onMove);
+      handle.addEventListener('pointerup', onUp);
+    });
+  }
+
   function initEditorUI() {
+    ensureEditorStyle();
     if (!document.body) return;
-    if (!document.getElementById('fig-editor-bar')) {
+
+    const toolbars = Array.from(document.querySelectorAll('.toolbar'));
+    const mainTb = toolbars.find(t => t.parentElement === document.body && t.querySelector('#btn-exam')) || toolbars[0];
+    toolbars.forEach(t => { if (t !== mainTb) t.remove(); });
+
+    if (mainTb) {
+      let btn = document.getElementById('btn-fig-edit');
+      if (!btn) {
+        btn = document.createElement('button');
+        btn.id = 'btn-fig-edit';
+        btn.textContent = '✏️ Chỉnh sửa hình';
+        btn.onclick = () => toggleFigEditor();
+      }
+      const refBtn = mainTb.querySelector('.b-exam');
+      if (btn.parentElement !== mainTb) {
+        mainTb.insertBefore(btn, refBtn || null);
+      }
+    }
+
+    let bar = document.getElementById('fig-editor-bar');
+    if (!bar) {
       document.body.insertAdjacentHTML('beforeend', EDITOR_HTML);
+      bar = document.getElementById('fig-editor-bar');
     }
-    const tb = document.querySelector('.toolbar');
-    if (tb && !document.getElementById('btn-fig-edit')) {
-      const btn = document.createElement('button');
-      btn.id = 'btn-fig-edit';
-      btn.textContent = '✏️ Chỉnh sửa hình';
-      btn.onclick = () => toggleFigEditor();
-      const refBtn = tb.querySelector('.b-exam');
-      tb.insertBefore(btn, refBtn || null);
+    if (bar) {
+      makeBarDraggable(bar);
+      bar.style.display = state.active ? 'block' : 'none';
     }
+
     setTimeout(fitDocContent, 120);
     if (typeof window.switchTab === 'function' && !window.switchTab._v36Wrapped) {
       const origSwitch = window.switchTab;
@@ -2481,4 +2541,6 @@ table{width:100%;max-width:100%!important;table-layout:fixed;word-wrap:break-wor
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initEditorUI);
   else initEditorUI();
   window.addEventListener('load', initEditorUI);
+  setTimeout(initEditorUI, 50);
+  setTimeout(initEditorUI, 400);
 })();
