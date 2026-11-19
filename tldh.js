@@ -826,3 +826,1659 @@ window.addEventListener('load', () => { window.switchTab = TL.switchTab; window.
 window.Geo = Geo; window.TLDH = TL;
 window.switchTab = TL.switchTab; window.downloadPDF = TL.downloadPDF; window.downloadPrintHTML = TL.downloadPrintHTML;
 })();
+/* === TLDN v3.6: 2D Auto-Resolver, Interactive Figure Editor & Smart A4 PDF Export === */
+(function(){
+  const EDITOR_CSS = `
+.paper,.doc{box-sizing:border-box!important;overflow-x:hidden!important}
+.doc *{box-sizing:border-box;max-width:100%}
+.question-block,.solution-item,.solution-step,.question-text,.step-chain,.summary-box,.theory-box,.options-grid>div,.tf-list>div{min-width:0;overflow-wrap:break-word;word-wrap:break-word}
+.options-grid{width:100%;max-width:100%}
+.step-chain{margin:6px 0;text-align:center}
+mjx-container[jax="SVG"]{max-width:100%!important;overflow:visible!important}
+mjx-container[jax="SVG"][display="true"]{display:block!important;width:100%!important;margin:6px 0!important}
+mjx-container[jax="SVG"] svg,.figure-box svg,.figure-box img{max-width:100%!important;height:auto!important}
+table{width:100%;max-width:100%!important;table-layout:fixed;word-wrap:break-word}
+#btn-fig-edit.active{background:#2563eb!important;color:#fff!important;border-color:#1d4ed8!important}
+.fig-edit-active .figure-box{outline:1.5px dashed #93c5fd;outline-offset:3px;border-radius:6px;position:relative;cursor:crosshair;min-height:140px}
+.fig-edit-active .figure-box svg{overflow:visible!important}
+.fig-edit-active .figure-box.fe-box-selected{outline:2px solid #2563eb;background:rgba(239,246,255,0.28)}
+.fig-edit-active .figure-box.fe-zoomed{overflow:auto!important;max-height:72vh;padding:8px}
+.fig-edit-active .figure-box.fe-zoomed svg{max-width:none!important;height:auto!important}
+.fig-edit-active .figure-box svg text{cursor:grab;user-select:none}
+.fig-edit-active .figure-box svg text:hover{fill:#2563eb}
+#fig-editor-bar{position:fixed;bottom:14px;right:14px;z-index:9999;background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 10px 28px rgba(15,23,42,.2);padding:10px 12px;font:12.5px/1.4 system-ui,-apple-system,sans-serif;color:#1e293b;display:none;max-width:440px}
+#fig-editor-bar.open{display:block}
+#fig-editor-bar .fe-title{font-weight:700;color:#1d4ed8;margin-bottom:5px;display:flex;justify-content:space-between;align-items:center}
+#fig-editor-bar .fe-hint{font-size:11px;color:#475569;margin-bottom:7px;line-height:1.35}
+#fig-editor-bar .fe-row{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;align-items:center}
+#fig-editor-bar button,#fig-editor-bar select{border:1px solid #cbd5e1;background:#f8fafc;color:#0f172a;border-radius:6px;padding:4px 7px;font-size:11.5px;cursor:pointer}
+#fig-editor-bar button:hover,#fig-editor-bar select:hover{background:#e2e8f0}
+#fig-editor-bar button.fe-on{background:#2563eb;color:#fff;border-color:#1d4ed8}
+#fig-editor-bar button.fe-danger{color:#b91c1c;border-color:#fecaca;background:#fef2f2}
+#fig-editor-bar .fe-swatch{width:18px;height:18px;padding:0;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px #94a3b8}
+#fe-zoom-val{font-weight:600;min-width:38px;text-align:center;font-size:11.5px;color:#334155}
+@media print{#fig-editor-bar,.fig-edit-overlay,.fe-preview{display:none!important}.paper,.doc{overflow:visible!important}.question-block,.solution-item,.figure-box,.step-chain,.summary-box,.theory-box{break-inside:avoid;page-break-inside:avoid}.section-title,.ans-group-title,.solution-header,.solution-label{break-after:avoid;page-break-after:avoid}}
+`;
+
+  const EDITOR_HTML = `
+<div id="fig-editor-bar">
+  <div class="fe-title"><span>✏️ Chỉnh sửa & Vẽ hình</span><button onclick="toggleFigEditor(false)" style="padding:2px 6px">✕</button></div>
+  <div class="fe-hint">• <b>Chọn/Kéo:</b> kéo trong lòng hình để kéo cả khối; kéo đỉnh, cạnh hoặc nhãn chữ; click cạnh đổi liền ↔ đứt<br>• <b>Kéo khối:</b> kéo bất kì cạnh/điểm nào để di chuyển toàn bộ khối liên thông</div>
+  <div class="fe-row">
+    <button id="fe-mode-select" class="fe-on" onclick="setFigTool('select')">🖱️ Chọn/Kéo</button>
+    <button id="fe-mode-moveblock" onclick="setFigTool('moveblock')">✥ Kéo khối</button>
+    <button id="fe-mode-drawedge" onclick="setFigTool('drawedge')">✏️ Vẽ đường thẳng</button>
+    <button id="fe-mode-connect" onclick="setFigTool('connect')">➕ Nối 2 điểm</button>
+    <button id="fe-mode-addpt" onclick="setFigTool('addpt')">📍 Thêm điểm</button>
+    <button id="fe-mode-copyedge" onclick="setFigTool('copyedge')">📋 Chép cạnh</button>
+  </div>
+  <div class="fe-row">
+    <button id="fe-mode-shape" onclick="setFigTool('shape')">📐 Vẽ hình:</button>
+    <select id="fe-shape-type" onchange="selectShapeType(this.value)">
+      <option value="square">⬜ Hình vuông</option>
+      <option value="rect">▭ Hình chữ nhật</option>
+      <option value="parallelogram">▱ Hình bình hành</option>
+      <option value="rhombus">◇ Hình thoi</option>
+      <option value="triangle">△ Tam giác thường</option>
+      <option value="iso_triangle">▲ Tam giác cân</option>
+      <option value="equi_triangle">🔺 Tam giác đều</option>
+      <option value="circle">⚪ Hình tròn</option>
+      <option value="ellipse">⬭ Hình elip</option>
+    </select>
+    <button id="fe-connect-dash" onclick="toggleNewEdgeDash()">Nét vẽ: Liền</button>
+  </div>
+  <div class="fe-row" id="fe-block-tools" style="display:none;padding-top:4px;border-top:1px solid #e2e8f0">
+    <span style="font-size:11px;font-weight:600">Đang chọn khối:</span>
+    <button onclick="duplicateSelectedBlock()">📋 Nhân bản khối</button>
+    <button onclick="toggleSelectedBlockDash()">┄ Liền↔Đứt</button>
+    <button class="fe-swatch" style="background:#111111" title="Đen" onclick="colorSelectedBlock('#111111')"></button>
+    <button class="fe-swatch" style="background:#dc2626" title="Đỏ" onclick="colorSelectedBlock('#dc2626')"></button>
+    <button class="fe-swatch" style="background:#2563eb" title="Xanh dương" onclick="colorSelectedBlock('#2563eb')"></button>
+    <button class="fe-swatch" style="background:#16a34a" title="Xanh lá" onclick="colorSelectedBlock('#16a34a')"></button>
+    <button class="fe-danger" onclick="deleteSelectedBlock()">🗑 Xóa khối</button>
+  </div>
+  <div class="fe-row" id="fe-edge-tools" style="display:none;padding-top:4px;border-top:1px solid #e2e8f0">
+    <span style="font-size:11px;font-weight:600">Đang chọn cạnh:</span>
+    <button onclick="toggleSelectedEdgeDash()">┄ Liền↔Đứt</button>
+    <button onclick="duplicateSelectedEdge()">📋 Nhân bản</button>
+    <button class="fe-swatch" style="background:#111111" title="Đen" onclick="colorSelectedEdge('#111111')"></button>
+    <button class="fe-swatch" style="background:#dc2626" title="Đỏ" onclick="colorSelectedEdge('#dc2626')"></button>
+    <button class="fe-swatch" style="background:#2563eb" title="Xanh dương" onclick="colorSelectedEdge('#2563eb')"></button>
+    <button class="fe-swatch" style="background:#16a34a" title="Xanh lá" onclick="colorSelectedEdge('#16a34a')"></button>
+    <button class="fe-danger" onclick="deleteSelectedEdge()">🗑 Xóa cạnh</button>
+  </div>
+  <div class="fe-row" id="fe-node-tools" style="display:none;padding-top:4px;border-top:1px solid #e2e8f0">
+    <span style="font-size:11px;font-weight:600">Đang chọn nút:</span>
+    <button class="fe-danger" onclick="deleteSelectedNode()">🗑 Xóa nút</button>
+  </div>
+  <div class="fe-row" style="padding-top:4px;border-top:1px solid #e2e8f0;margin-bottom:0">
+    <button onclick="zoomActiveFig(-0.25)" title="Thu nhỏ hình">🔍−</button>
+    <span id="fe-zoom-val" onclick="zoomActiveFig(0)" style="cursor:pointer" title="Bấm để về 100%">100%</span>
+    <button onclick="zoomActiveFig(0.25)" title="Phóng to hình">🔍+</button>
+    <button onclick="undoFigEdit()" title="Ctrl+Z">↩ Hoàn tác</button>
+    <button onclick="resetActiveFig()">⟲ Gốc</button>
+    <button onclick="saveEditedHTML()">💾 Lưu HTML</button>
+  </div>
+</div>`;
+
+  if (!document.getElementById('fig-editor-style') && document.head) {
+    const st = document.createElement('style');
+    st.id = 'fig-editor-style';
+    st.textContent = EDITOR_CSS;
+    document.head.appendChild(st);
+  }
+
+  /* --- 1. Geo.draw 2D Auto-Resolver & Fallback Renderer --- */
+  if (window.Geo && !window.Geo._v36Patched) {
+    window.Geo._v36Patched = true;
+    const _rawDraw = Geo.draw.bind(Geo);
+    const isNumPt = (v, dim) => Array.isArray(v) && v.length >= dim && v.slice(0, dim).every(x => typeof x === 'number' && Number.isFinite(x));
+    const splitPts = (str, P) => {
+      if (Array.isArray(str)) return str;
+      if (typeof str !== 'string') return [];
+      const keys = P ? Object.keys(P).sort((a, b) => b.length - a.length) : [];
+      const out = [];
+      let i = 0;
+      while (i < str.length) {
+        const k = keys.find(key => str.startsWith(key, i));
+        if (k) { out.push(k); i += k.length; }
+        else { out.push(str[i]); i++; }
+      }
+      return out;
+    };
+    const resolveP2D = rawP => {
+      const P = {};
+      for (const k in (rawP || {})) {
+        if (isNumPt(rawP[k], 2)) P[k] = [rawP[k][0], rawP[k][1]];
+      }
+      for (let pass = 0; pass < 6; pass++) {
+        let changed = false;
+        for (const k in (rawP || {})) {
+          if (P[k] || typeof rawP[k] !== 'string') continue;
+          const toks = rawP[k].trim().split(/\s+/);
+          const op = toks[0];
+          const pts = toks.slice(1, 4).flatMap(t => splitPts(t, P)).map(name => P[name]);
+          if (op === 'mid' && pts.length >= 2 && pts[0] && pts[1]) {
+            P[k] = [(pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2]; changed = true;
+          } else if (op === 'at' && pts.length >= 2 && pts[0] && pts[1]) {
+            const rStr = toks[toks.length - 1];
+            const r = rStr.includes('/') ? (+rStr.split('/')[0] / +rStr.split('/')[1]) : +rStr;
+            if (Number.isFinite(r)) { P[k] = [pts[0][0] + r * (pts[1][0] - pts[0][0]), pts[0][1] + r * (pts[1][1] - pts[0][1])]; changed = true; }
+          } else if (op === 'g' && pts.length >= 3 && pts[0] && pts[1] && pts[2]) {
+            P[k] = [(pts[0][0] + pts[1][0] + pts[2][0]) / 3, (pts[0][1] + pts[1][1] + pts[2][1]) / 3]; changed = true;
+          } else if (op === 'sym' && pts.length >= 2 && pts[0] && pts[1]) {
+            P[k] = [2 * pts[1][0] - pts[0][0], 2 * pts[1][1] - pts[0][1]]; changed = true;
+          } else if (op === 'add' && pts.length >= 3 && pts[0] && pts[1] && pts[2]) {
+            P[k] = [pts[0][0] + pts[2][0] - pts[1][0], pts[0][1] + pts[2][1] - pts[1][1]]; changed = true;
+          } else if (op === 'foot' && pts.length >= 3 && pts[0] && pts[1] && pts[2]) {
+            const vx = pts[2][0] - pts[1][0], vy = pts[2][1] - pts[1][1], l2 = vx * vx + vy * vy;
+            if (l2 > 1e-9) { const t = ((pts[0][0] - pts[1][0]) * vx + (pts[0][1] - pts[1][1]) * vy) / l2; P[k] = [pts[1][0] + t * vx, pts[1][1] + t * vy]; changed = true; }
+          } else if (op === 'meet' && pts.length >= 4 && pts[0] && pts[1] && pts[2] && pts[3]) {
+            const [x1, y1] = pts[0], [x2, y2] = pts[1], [x3, y3] = pts[2], [x4, y4] = pts[3];
+            const den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+            if (Math.abs(den) > 1e-9) {
+              const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / den;
+              P[k] = [x1 + t * (x2 - x1), y1 + t * (y2 - y1)]; changed = true;
+            }
+          }
+        }
+        if (!changed) break;
+      }
+      return P;
+    };
+    const renderFallback2D = (box, cfg) => {
+      const P = cfg.P || {};
+      const allPts = [];
+      Object.values(P).forEach(pt => { if (isNumPt(pt, 2)) allPts.push(pt); });
+      (cfg.segs || []).forEach(s => (s.p || []).forEach(pt => { if (isNumPt(pt, 2)) allPts.push(pt); }));
+      (cfg.fills || []).forEach(f => (f.pts || f.p || []).forEach(pt => { if (isNumPt(pt, 2)) allPts.push(pt); }));
+      (cfg.circles || []).forEach(c => { if (isNumPt(c.c, 2)) { allPts.push([c.c[0] - c.r, c.c[1] - c.r], [c.c[0] + c.r, c.c[1] + c.r]); } });
+      if (cfg.axes && isNumPt(cfg.axes.x, 2) && isNumPt(cfg.axes.y, 2)) allPts.push([cfg.axes.x[0], cfg.axes.y[0]], [cfg.axes.x[1], cfg.axes.y[1]]);
+      if (!allPts.length) allPts.push([0, 0], [4, 4]);
+      let minX = Math.min(...allPts.map(p => p[0])), maxX = Math.max(...allPts.map(p => p[0]));
+      let minY = Math.min(...allPts.map(p => p[1])), maxY = Math.max(...allPts.map(p => p[1]));
+      if (maxX - minX < 1e-6) { minX -= 1; maxX += 1; }
+      if (maxY - minY < 1e-6) { minY -= 1; maxY += 1; }
+      const spanX = maxX - minX, spanY = maxY - minY;
+      const scaleX = 240 / spanX, scaleY = 180 / spanY;
+      const useUniform = !cfg.axes;
+      const sx = useUniform ? Math.min(scaleX, scaleY) : scaleX;
+      const sy = useUniform ? Math.min(scaleX, scaleY) : scaleY;
+      const pad = 42;
+      const w = spanX * sx + pad * 2, h = spanY * sy + pad * 2;
+      const tx = x => pad + (x - minX) * sx;
+      const ty = y => pad + (maxY - y) * sy;
+      let body = '';
+      (cfg.fills || []).forEach(f => {
+        const pts = (f.pts || f.p || []).filter(pt => isNumPt(pt, 2));
+        if (pts.length >= 3) body += `<polygon points="${pts.map(p => `${tx(p[0]).toFixed(1)},${ty(p[1]).toFixed(1)}`).join(' ')}" fill="${f.color || 'rgba(37,99,235,0.18)'}" stroke="none"/>`;
+      });
+      if (cfg.axes && isNumPt(cfg.axes.x, 2) && isNumPt(cfg.axes.y, 2)) {
+        const [x0, x1] = cfg.axes.x, [y0, y1] = cfg.axes.y;
+        const ay = (y0 <= 0 && y1 >= 0) ? 0 : y0;
+        const ax = (x0 <= 0 && x1 >= 0) ? 0 : x0;
+        const xStart = tx(x0), xEnd = tx(x1), yAxis = ty(ay);
+        const yStart = ty(y0), yEnd = ty(y1), xAxis = tx(ax);
+        body += `<line x1="${xStart.toFixed(1)}" y1="${yAxis.toFixed(1)}" x2="${xEnd.toFixed(1)}" y2="${yAxis.toFixed(1)}" stroke="#334155" stroke-width="1.3"/>`;
+        body += `<polygon points="${xEnd.toFixed(1)},${yAxis.toFixed(1)} ${(xEnd-7).toFixed(1)},${(yAxis-3.2).toFixed(1)} ${(xEnd-7).toFixed(1)},${(yAxis+3.2).toFixed(1)}" fill="#334155"/>`;
+        body += `<line x1="${xAxis.toFixed(1)}" y1="${yStart.toFixed(1)}" x2="${xAxis.toFixed(1)}" y2="${yEnd.toFixed(1)}" stroke="#334155" stroke-width="1.3"/>`;
+        body += `<polygon points="${xAxis.toFixed(1)},${yEnd.toFixed(1)} ${(xAxis-3.2).toFixed(1)},${(yEnd+7).toFixed(1)} ${(xAxis+3.2).toFixed(1)},${(yEnd+7).toFixed(1)}" fill="#334155"/>`;
+        if (Array.isArray(cfg.axes.xt)) {
+          cfg.axes.xt.forEach(v => {
+            if (typeof v !== 'number') return;
+            const px = tx(v);
+            body += `<line x1="${px.toFixed(1)}" y1="${(yAxis-3).toFixed(1)}" x2="${px.toFixed(1)}" y2="${(yAxis+3).toFixed(1)}" stroke="#334155" stroke-width="1.1"/>`;
+            body += `<text x="${px.toFixed(1)}" y="${(yAxis+15).toFixed(1)}" text-anchor="middle" font-family="Times New Roman,serif" font-size="12.5" fill="#111111">${v}</text>`;
+          });
+        }
+        if (Array.isArray(cfg.axes.yt)) {
+          cfg.axes.yt.forEach(v => {
+            if (typeof v !== 'number') return;
+            const py = ty(v);
+            body += `<line x1="${(xAxis-3).toFixed(1)}" y1="${py.toFixed(1)}" x2="${(xAxis+3).toFixed(1)}" y2="${py.toFixed(1)}" stroke="#334155" stroke-width="1.1"/>`;
+            body += `<text x="${(xAxis-7).toFixed(1)}" y="${(py+4).toFixed(1)}" text-anchor="end" font-family="Times New Roman,serif" font-size="12.5" fill="#111111">${v}</text>`;
+          });
+        }
+        if (cfg.axes.xl) body += `<text x="${(xEnd+4).toFixed(1)}" y="${(yAxis+16).toFixed(1)}" font-family="Times New Roman,serif" font-size="13" font-style="italic" fill="#111111">${cfg.axes.xl}</text>`;
+        if (cfg.axes.yl) body += `<text x="${(xAxis-6).toFixed(1)}" y="${(yEnd-6).toFixed(1)}" text-anchor="end" font-family="Times New Roman,serif" font-size="13" font-style="italic" fill="#111111">${cfg.axes.yl}</text>`;
+      }
+      (cfg.fn || []).forEach(item => {
+        if (typeof item.f !== 'function' || !isNumPt(item.x, 2)) return;
+        const [a, b] = item.x, pts = [];
+        for (let i = 0; i <= 120; i++) {
+          const x = a + (b - a) * i / 120, y = item.f(x);
+          if (Number.isFinite(y) && Math.abs(y) < 1e4) pts.push(`${tx(x).toFixed(1)},${ty(y).toFixed(1)}`);
+        }
+        if (pts.length >= 2) body += `<polyline points="${pts.join(' ')}" fill="none" stroke="${item.color || '#1d4ed8'}" stroke-width="1.8"/>`;
+      });
+      (cfg.circles || []).forEach(c => {
+        if (isNumPt(c.c, 2) && c.r > 0) body += `<circle cx="${tx(c.c[0]).toFixed(1)}" cy="${ty(c.c[1]).toFixed(1)}" r="${(c.r * sx).toFixed(1)}" fill="none" stroke="${c.color || '#111111'}" stroke-width="1.5"${c.dash ? ' stroke-dasharray="5,4"' : ''}/>`;
+      });
+      (cfg.segs || []).forEach(s => {
+        const pts = (s.p || []).filter(pt => isNumPt(pt, 2));
+        for (let i = 0; i < pts.length - 1; i++) {
+          body += `<line x1="${tx(pts[i][0]).toFixed(1)}" y1="${ty(pts[i][1]).toFixed(1)}" x2="${tx(pts[i+1][0]).toFixed(1)}" y2="${ty(pts[i+1][1]).toFixed(1)}" stroke="${s.color || '#111111'}" stroke-width="1.5"${s.dash ? ' stroke-dasharray="5,4"' : ''}/>`;
+        }
+      });
+      const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+      Object.entries(P).forEach(([name, pt]) => {
+        if (!isNumPt(pt, 2) || name.startsWith('_')) return;
+        const px = tx(pt[0]), py = ty(pt[1]);
+        const ox = pt[0] <= minX + 1e-3 ? -12 : (pt[0] > cx + 1e-3 ? 7 : -4);
+        const oy = pt[1] > cy + 1e-3 ? -7 : 15;
+        body += `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="2.5" fill="#111111"/>`;
+        body += `<text x="${(px + ox).toFixed(1)}" y="${(py + oy).toFixed(1)}" font-family="Times New Roman,serif" font-size="13.5" font-style="italic" fill="#111111">${name}</text>`;
+      });
+      (cfg.texts || []).forEach(item => {
+        const pt = isNumPt(item.p, 2) ? item.p : (isNumPt(item.at, 2) ? item.at : (typeof item.on === 'string' && P[item.on] ? P[item.on] : null));
+        if (!pt || !item.t) return;
+        body += `<text x="${tx(pt[0]).toFixed(1)}" y="${ty(pt[1]).toFixed(1)}" font-family="Times New Roman,serif" font-size="13" fill="#111111">${item.t}</text>`;
+      });
+      box.innerHTML = `<svg viewBox="0 0 ${w.toFixed(0)} ${h.toFixed(0)}" width="${w.toFixed(0)}" height="${h.toFixed(0)}" xmlns="http://www.w3.org/2000/svg">${body}</svg>`;
+    };
+    Geo.draw = function(id, rawCfg) {
+      const box = document.getElementById(id);
+      if (box && box.dataset.rendered === '1') return;
+      const cfg = Object.assign({}, rawCfg || {});
+      const rawP = cfg.P || {};
+      if (!cfg.mode) {
+        const pVals = Object.values(rawP).filter(Array.isArray);
+        if (cfg.axes || cfg.fn || cfg.curves || cfg.regions || cfg.parts || (pVals.length > 0 && pVals.every(v => v.length === 2) && !cfg.solids && !cfg.planes && !cfg.round && !cfg.oxyz)) {
+          cfg.mode = '2d';
+        }
+      }
+      if (cfg.mode === '2d') {
+        const P = resolveP2D(rawP);
+        cfg.P = P;
+        const toCoord = v => isNumPt(v, 2) ? [v[0], v[1]] : (typeof v === 'string' && P[v] ? P[v] : null);
+        if (cfg.axes === true) cfg.axes = { x: [-5, 5], y: [-5, 5], xl: 'x', yl: 'y' };
+        if (Array.isArray(cfg.segs)) {
+          cfg.segs = cfg.segs.map(s => {
+            const obj = typeof s === 'string' ? { p: splitPts(s, P) } : Object.assign({}, s);
+            const rawList = typeof obj.p === 'string' ? splitPts(obj.p, P) : (Array.isArray(obj.p) ? obj.p : (typeof obj.s === 'string' ? splitPts(obj.s, P) : (Array.isArray(obj.s) ? obj.s : [])));
+            obj.p = rawList.map(toCoord).filter(Boolean);
+            return obj;
+          }).filter(s => s.p.length >= 2);
+        }
+        if (Array.isArray(cfg.fills)) {
+          cfg.fills = cfg.fills.map(f => {
+            const obj = typeof f === 'string' ? { pts: splitPts(f, P) } : Object.assign({}, f);
+            const rawList = typeof obj.pts === 'string' ? splitPts(obj.pts, P) : (Array.isArray(obj.pts) ? obj.pts : (typeof obj.p === 'string' ? splitPts(obj.p, P) : (Array.isArray(obj.p) ? obj.p : [])));
+            const coords = rawList.map(toCoord).filter(Boolean);
+            obj.pts = coords; obj.p = coords;
+            return obj;
+          }).filter(f => f.pts.length >= 3);
+        }
+        if (Array.isArray(cfg.fn)) {
+          const defX = (cfg.axes && isNumPt(cfg.axes.x, 2)) ? cfg.axes.x : [-5, 5];
+          cfg.fn = cfg.fn.filter(item => item && typeof item.f === 'function').map(item => Object.assign({}, item, { x: isNumPt(item.x, 2) ? item.x : defX }));
+        }
+        if (Array.isArray(cfg.curves)) {
+          cfg.curves = cfg.curves.filter(c => c && typeof c.x === 'function' && typeof c.y === 'function').map(c => Object.assign({}, c, { t: isNumPt(c.t, 2) ? c.t : [0, 6.2832] }));
+        }
+        if (Array.isArray(cfg.circles)) {
+          cfg.circles = cfg.circles.map(c => Object.assign({}, c, { c: toCoord(c && c.c) })).filter(c => c.c && typeof c.r === 'number' && c.r > 0);
+        }
+        if (Array.isArray(cfg.arcs)) {
+          cfg.arcs = cfg.arcs.map(a => Object.assign({}, a, { c: toCoord(a && a.c) })).filter(a => a.c);
+        }
+        if (Array.isArray(cfg.arrows)) {
+          cfg.arrows = cfg.arrows.map(a => Object.assign({}, a, { from: toCoord(a && a.from), to: toCoord(a && a.to) })).filter(a => a.from && a.to);
+        }
+        if (Array.isArray(cfg.hatch)) {
+          cfg.hatch = cfg.hatch.map(h => {
+            const rawList = typeof h.p === 'string' ? splitPts(h.p, P) : (Array.isArray(h.p) ? h.p : []);
+            return Object.assign({}, h, { p: rawList.map(toCoord).filter(Boolean) });
+          }).filter(h => h.p.length >= 2);
+        }
+        if (Array.isArray(cfg.right)) {
+          cfg.right = cfg.right.filter(r => { const pts = splitPts(r, P); return pts.length === 3 && pts.every(k => P[k]); });
+        }
+        if (Array.isArray(cfg.angles)) {
+          cfg.angles = cfg.angles.filter(a => { const pts = splitPts(a && a.a, P); return pts.length === 3 && pts.every(k => P[k]); });
+        }
+        if (Array.isArray(cfg.marks)) {
+          cfg.marks = cfg.marks.filter(m => { const pts = splitPts(m && m.s, P); return pts.length === 2 && pts.every(k => P[k]); });
+        }
+        if (Array.isArray(cfg.texts)) {
+          cfg.texts = cfg.texts.map(t => {
+            if (!t) return null;
+            const item = Object.assign({}, t);
+            if (item.t === undefined && (item.text !== undefined || item.label !== undefined)) {
+              item.t = String(item.text ?? item.label);
+            }
+            if (typeof item.x === 'number' && typeof item.y === 'number') {
+              item.p = [item.x, item.y];
+            }
+            if (isNumPt(item.p, 2)) {
+              item.p = [item.p[0], item.p[1]];
+              if (!isNumPt(item.at, 2)) item.at = item.p;
+              return item;
+            }
+            if (isNumPt(item.at, 2)) {
+              item.at = [item.at[0], item.at[1]];
+              item.p = item.at;
+              return item;
+            }
+            const target = item.on || item.p;
+            if (typeof target === 'string') {
+              const pts = splitPts(target, P);
+              if (pts.length >= 1 && pts.every(k => P[k])) return item;
+            }
+            return null;
+          }).filter(Boolean);
+        }
+      } else if (cfg.P) {
+        const fixedP = {};
+        for (const k in rawP) {
+          const v = rawP[k];
+          if (isNumPt(v, 3)) fixedP[k] = [v[0], v[1], v[2]];
+          else if (isNumPt(v, 2)) fixedP[k] = [v[0], v[1], 0];
+          else if (typeof v === 'string') fixedP[k] = v;
+        }
+        cfg.P = fixedP;
+      }
+      try { _rawDraw(id, cfg); } catch (_) {}
+      if (box && (!box.querySelector('svg') || box.textContent.includes('Lỗi vẽ hình'))) {
+        renderFallback2D(box, cfg);
+      }
+    };
+  }
+
+  /* --- 2. Interactive SVG Figure Editor & A4 PDF Exporter --- */
+  const NS = 'http://www.w3.org/2000/svg';
+  const state = {
+    active: false,
+    tool: 'select',
+    shapeType: 'square',
+    newDash: false,
+    originals: new Map(),
+    undo: [],
+    selEdge: null,
+    selNode: null,
+    selBlock: null,
+    selBox: null,
+    activeBox: null,
+    pendingNode: null,
+    zooms: new WeakMap(),
+    baseSizes: new WeakMap()
+  };
+  const boundBoxes = new WeakSet();
+  const boundTexts = new WeakSet();
+  const el = (tag, attrs) => { const n = document.createElementNS(NS, tag); for (const k in attrs) n.setAttribute(k, attrs[k]); return n; };
+  const ptSvg = (svg, cx, cy) => { const p = svg.createSVGPoint(); p.x = cx; p.y = cy; const ctm = svg.getScreenCTM(); return ctm ? p.matrixTransform(ctm.inverse()) : {x: cx, y: cy}; };
+  const parsePts = str => (str || '').trim().split(/\s+/).map(s => s.split(',').map(Number)).filter(a => a.length === 2 && !isNaN(a[0]));
+  const fmtPts = pts => pts.map(p => p.map(v => +v.toFixed(2)).join(',')).join(' ');
+  const safeFileName = (suffix, prefix) => (prefix || '') + ((typeof EXAM_TITLE !== 'undefined' && EXAM_TITLE) || document.title || 'tai-lieu-ttn').replace(/[\\/:*?"<>|]/g, '_').trim() + (suffix || '');
+
+  function updateSelectionBars() {
+    const blockBar = document.getElementById('fe-block-tools');
+    const edgeBar = document.getElementById('fe-edge-tools');
+    const nodeBar = document.getElementById('fe-node-tools');
+    if (blockBar) blockBar.style.display = (state.selBlock && state.selBlock.length >= 3) ? 'flex' : 'none';
+    if (edgeBar) edgeBar.style.display = state.selEdge ? 'flex' : 'none';
+    if (nodeBar) nodeBar.style.display = state.selNode ? 'flex' : 'none';
+  }
+
+  function clearSelection() {
+    state.selEdge = null;
+    state.selNode = null;
+    state.selBlock = null;
+    updateSelectionBars();
+  }
+
+  function triggerDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 10000);
+  }
+
+  function getBoxZoom(box) { return state.zooms.get(box) || 1; }
+
+  function updateZoomLabel() {
+    const lbl = document.getElementById('fe-zoom-val');
+    if (!lbl) return;
+    const z = state.activeBox ? getBoxZoom(state.activeBox) : 1;
+    lbl.textContent = Math.round(z * 100) + '%';
+  }
+
+  function setActiveBox(box) {
+    if (!box) return;
+    if (state.activeBox && state.activeBox !== box) state.activeBox.classList.remove('fe-box-selected');
+    state.activeBox = box;
+    if (state.active) box.classList.add('fe-box-selected');
+    updateZoomLabel();
+  }
+
+  function applyBoxZoom(box, z) {
+    if (!box) return;
+    const svg = box.querySelector('svg');
+    if (!svg) return;
+    const clamped = Math.max(0.5, Math.min(4, Math.round(z * 100) / 100));
+    if (!state.baseSizes.has(svg)) {
+      const rect = svg.getBoundingClientRect();
+      const vb = svg.viewBox && svg.viewBox.baseVal;
+      const w = parseFloat(svg.getAttribute('width')) || rect.width || (vb && vb.width) || 300;
+      const h = parseFloat(svg.getAttribute('height')) || rect.height || (vb && vb.height) || 200;
+      state.baseSizes.set(svg, { w, h });
+    }
+    const base = state.baseSizes.get(svg);
+    state.zooms.set(box, clamped);
+    if (Math.abs(clamped - 1) < 0.01) {
+      box.classList.remove('fe-zoomed');
+      svg.style.width = '';
+      svg.style.height = '';
+    } else {
+      box.classList.add('fe-zoomed');
+      svg.style.width = (base.w * clamped).toFixed(1) + 'px';
+      svg.style.height = (base.h * clamped).toFixed(1) + 'px';
+    }
+    setActiveBox(box);
+  }
+
+  function expandViewBoxIfNeeded(svg) {
+    if (!svg || !svg.viewBox || !svg.viewBox.baseVal) return;
+    const vb = svg.viewBox.baseVal;
+    const vx = vb.x, vy = vb.y, vw = vb.width, vh = vb.height;
+    if (vw <= 0 || vh <= 0) return;
+    const xs = [], ys = [];
+    const addPt = (x, y) => { if (Number.isFinite(x) && Number.isFinite(y)) { xs.push(x); ys.push(y); } };
+    svg.querySelectorAll('line').forEach(l => {
+      if (l.closest('.fig-edit-overlay') || l.closest('.fe-preview')) return;
+      addPt(+l.getAttribute('x1'), +l.getAttribute('y1'));
+      addPt(+l.getAttribute('x2'), +l.getAttribute('y2'));
+    });
+    svg.querySelectorAll('circle').forEach(c => {
+      if (c.closest('.fig-edit-overlay') || c.closest('.fe-preview')) return;
+      const cx = +c.getAttribute('cx'), cy = +c.getAttribute('cy'), r = +c.getAttribute('r') || 0;
+      addPt(cx - r, cy - r); addPt(cx + r, cy + r);
+    });
+    svg.querySelectorAll('ellipse').forEach(ep => {
+      if (ep.closest('.fig-edit-overlay') || ep.closest('.fe-preview')) return;
+      const cx = +ep.getAttribute('cx'), cy = +ep.getAttribute('cy'), rx = +ep.getAttribute('rx') || 0, ry = +ep.getAttribute('ry') || 0;
+      addPt(cx - rx, cy - ry); addPt(cx + rx, cy + ry);
+    });
+    svg.querySelectorAll('polygon, polyline').forEach(pl => {
+      if (pl.closest('.fig-edit-overlay') || pl.closest('.fe-preview')) return;
+      parsePts(pl.getAttribute('points')).forEach(p => addPt(p[0], p[1]));
+    });
+    svg.querySelectorAll('path').forEach(p => {
+      if (p.closest('.fig-edit-overlay') || p.closest('.fe-preview')) return;
+      const d = p.getAttribute('d') || '';
+      for (const m of d.matchAll(/([-\d.]+)[,\s]+([-\d.]+)/g)) addPt(+m[1], +m[2]);
+    });
+    svg.querySelectorAll('text').forEach(t => {
+      if (t.closest('.fig-edit-overlay') || t.closest('.fe-preview')) return;
+      addPt(+t.getAttribute('x'), +t.getAttribute('y'));
+    });
+    if (!xs.length) return;
+    const pad = 14;
+    const minX = Math.min(...xs) - pad, maxX = Math.max(...xs) + pad;
+    const minY = Math.min(...ys) - pad, maxY = Math.max(...ys) + pad;
+    if (minX >= vx && minY >= vy && maxX <= vx + vw && maxY <= vy + vh) return;
+    const newVx = Math.min(vx, minX), newVy = Math.min(vy, minY);
+    const newMaxX = Math.max(vx + vw, maxX), newMaxY = Math.max(vy + vh, maxY);
+    const newVw = newMaxX - newVx, newVh = newMaxY - newVy;
+    const curW = parseFloat(svg.getAttribute('width')) || vw;
+    const curH = parseFloat(svg.getAttribute('height')) || vh;
+    const scaleX = curW / vw, scaleY = curH / vh;
+    const nextW = +(newVw * scaleX).toFixed(1), nextH = +(newVh * scaleY).toFixed(1);
+    svg.setAttribute('viewBox', `${newVx.toFixed(1)} ${newVy.toFixed(1)} ${newVw.toFixed(1)} ${newVh.toFixed(1)}`);
+    svg.setAttribute('width', nextW);
+    svg.setAttribute('height', nextH);
+    state.baseSizes.set(svg, { w: nextW, h: nextH });
+    const box = svg.closest('.figure-box');
+    if (box && getBoxZoom(box) !== 1) applyBoxZoom(box, getBoxZoom(box));
+  }
+
+  function saveSnapshot(box) {
+    if (!box) return;
+    const clone = box.cloneNode(true);
+    clone.querySelectorAll('.fig-edit-overlay, .fe-preview').forEach(o => o.remove());
+    state.undo.push({ box, html: clone.innerHTML });
+    if (state.undo.length > 60) state.undo.shift();
+  }
+
+  function normalizeStrokedPolys(svg) {
+    const existing = [];
+    svg.querySelectorAll('line').forEach(l => {
+      if (l.closest('.fig-edit-overlay') || l.closest('.fe-preview')) return;
+      existing.push([+l.getAttribute('x1'), +l.getAttribute('y1'), +l.getAttribute('x2'), +l.getAttribute('y2')]);
+    });
+    const hasSeg = (a, b) => existing.some(s => (Math.hypot(s[0]-a[0], s[1]-a[1]) < 2.2 && Math.hypot(s[2]-b[0], s[3]-b[1]) < 2.2) || (Math.hypot(s[0]-b[0], s[1]-b[1]) < 2.2 && Math.hypot(s[2]-a[0], s[3]-a[1]) < 2.2));
+    svg.querySelectorAll('polygon, polyline').forEach(pl => {
+      if (pl.closest('.fig-edit-overlay') || pl.closest('.fe-preview')) return;
+      const stroke = pl.getAttribute('stroke') || getComputedStyle(pl).stroke;
+      if (!stroke || stroke === 'none' || stroke === 'rgba(0, 0, 0, 0)') return;
+      const pts = parsePts(pl.getAttribute('points'));
+      if (pts.length < 2) return;
+      const closed = pl.tagName.toLowerCase() === 'polygon';
+      const sw = pl.getAttribute('stroke-width') || '1.5';
+      const dash = pl.getAttribute('stroke-dasharray');
+      const count = closed ? pts.length : pts.length - 1;
+      for (let i = 0; i < count; i++) {
+        const a = pts[i], b = pts[(i + 1) % pts.length];
+        if (!hasSeg(a, b)) {
+          const attrs = { x1: a[0].toFixed(2), y1: a[1].toFixed(2), x2: b[0].toFixed(2), y2: b[1].toFixed(2), stroke, 'stroke-width': sw };
+          if (dash && dash !== 'none') attrs['stroke-dasharray'] = dash;
+          pl.parentNode.insertBefore(el('line', attrs), pl.nextSibling);
+          existing.push([a[0], a[1], b[0], b[1]]);
+        }
+      }
+      pl.setAttribute('stroke', 'none');
+      pl.style.stroke = 'none';
+    });
+  }
+
+  function polyArea(pts) {
+    let a = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i], q = pts[(i + 1) % pts.length];
+      a += p[0] * q[1] - q[0] * p[1];
+    }
+    return Math.abs(a) * 0.5;
+  }
+
+  function findClosedCycles(nodes, edges, polys) {
+    const idxMap = new Map(nodes.map((n, i) => [n, i]));
+    const adj = nodes.map(() => []);
+    edges.forEach(e => {
+      const u = idxMap.get(e.n1), v = idxMap.get(e.n2);
+      if (u !== undefined && v !== undefined && u !== v) {
+        adj[u].push({ to: v, edge: e });
+        adj[v].push({ to: u, edge: e });
+      }
+    });
+    const seen = new Set();
+    const cycles = [];
+    const addCycle = nodeList => {
+      const uniq = Array.from(new Set(nodeList));
+      if (uniq.length < 3) return;
+      const area = polyArea(nodeList.map(n => [n.x, n.y]));
+      if (area < 25) return;
+      const key = uniq.map(n => idxMap.get(n)).sort((a, b) => a - b).join(',');
+      if (seen.has(key)) return;
+      seen.add(key);
+      cycles.push({ nodes: nodeList, area });
+    };
+    polys.forEach(poly => {
+      if (poly.pts.length >= 3) {
+        const mapped = poly.pts.map(pt => nodes.find(n => Math.hypot(n.x - pt[0], n.y - pt[1]) <= 2.4)).filter(Boolean);
+        if (mapped.length >= 3) addCycle(mapped);
+      }
+    });
+    edges.forEach(e => {
+      const s = idxMap.get(e.n1), t = idxMap.get(e.n2);
+      if (s === undefined || t === undefined || s === t) return;
+      const parent = new Array(nodes.length).fill(-1);
+      const dist = new Array(nodes.length).fill(-1);
+      const q = [s];
+      dist[s] = 0;
+      let head = 0;
+      while (head < q.length) {
+        const cur = q[head++];
+        if (dist[cur] >= 7) continue;
+        for (const nb of adj[cur]) {
+          if (nb.edge === e) continue;
+          if (dist[nb.to] === -1) {
+            dist[nb.to] = dist[cur] + 1;
+            parent[nb.to] = cur;
+            if (nb.to === t) { head = q.length; break; }
+            q.push(nb.to);
+          }
+        }
+      }
+      if (dist[t] >= 2) {
+        const path = [];
+        let cur = t;
+        while (cur !== -1) { path.push(nodes[cur]); cur = parent[cur]; }
+        addCycle(path);
+      }
+    });
+    cycles.sort((a, b) => b.area - a.area);
+    return cycles.map(c => c.nodes);
+  }
+
+  function getConnectedComponent(seedNodes, g) {
+    const visited = new Set(seedNodes);
+    const queue = [...seedNodes];
+    while (queue.length) {
+      const cur = queue.shift();
+      cur.refs.forEach(r => {
+        if (r.e) [r.e.n1, r.e.n2].forEach(nb => { if (nb && !visited.has(nb)) { visited.add(nb); queue.push(nb); } });
+        if (r.poly) r.poly.pts.forEach(pt => {
+          const nb = g.nodes.find(nd => Math.hypot(nd.x - pt[0], nd.y - pt[1]) <= 2.4);
+          if (nb && !visited.has(nb)) { visited.add(nb); queue.push(nb); }
+        });
+      });
+      if (cur.parentSeg) [cur.parentSeg.n1, cur.parentSeg.n2].forEach(nb => { if (nb && !visited.has(nb)) { visited.add(nb); queue.push(nb); } });
+      g.nodes.forEach(other => {
+        if (!visited.has(other) && other.parentSeg && (other.parentSeg.n1 === cur || other.parentSeg.n2 === cur)) {
+          visited.add(other); queue.push(other);
+        }
+      });
+    }
+    return Array.from(visited);
+  }
+
+  function buildGraph(svg) {
+    normalizeStrokedPolys(svg);
+    const nodes = [], edges = [], polys = [], shapes = [];
+    const getNode = (x, y) => {
+      let n = nodes.find(v => Math.hypot(v.x - x, v.y - y) <= 2.4);
+      if (!n) { n = { x, y, dots: [], refs: [], texts: [], decos: [], parentSeg: null }; nodes.push(n); }
+      return n;
+    };
+    svg.querySelectorAll('circle').forEach(c => {
+      if (c.closest('.fig-edit-overlay') || c.closest('.fe-preview')) return;
+      const r = parseFloat(c.getAttribute('r') || '0');
+      if (r > 0 && r <= 6) getNode(+c.getAttribute('cx'), +c.getAttribute('cy')).dots.push(c);
+      else if (r > 6) shapes.push({ kind: 'circle', el: c, cx: +c.getAttribute('cx'), cy: +c.getAttribute('cy'), r });
+    });
+    svg.querySelectorAll('ellipse').forEach(ep => {
+      if (ep.closest('.fig-edit-overlay') || ep.closest('.fe-preview')) return;
+      shapes.push({ kind: 'ellipse', el: ep, cx: +ep.getAttribute('cx'), cy: +ep.getAttribute('cy'), rx: +ep.getAttribute('rx'), ry: +ep.getAttribute('ry') });
+    });
+    svg.querySelectorAll('line').forEach(l => {
+      if (l.closest('.fig-edit-overlay') || l.closest('.fe-preview')) return;
+      const p1 = { x: +l.getAttribute('x1'), y: +l.getAttribute('y1') };
+      const p2 = { x: +l.getAttribute('x2'), y: +l.getAttribute('y2') };
+      if (Math.hypot(p2.x - p1.x, p2.y - p1.y) < 16) {
+        const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
+        const nearN = nodes.find(n => Math.hypot(n.x - mx, n.y - my) < 22 && Math.hypot(n.x - p1.x, n.y - p1.y) > 2 && Math.hypot(n.x - p2.x, n.y - p2.y) > 2);
+        if (nearN) { nearN.decos.push({ el: l, dx: 0, dy: 0 }); return; }
+      }
+      const n1 = getNode(p1.x, p1.y), n2 = getNode(p2.x, p2.y);
+      const e = { el: l, kind: 'line', p1, p2, n1, n2, texts: [] };
+      edges.push(e); n1.refs.push({ e, end: 'p1' }); n2.refs.push({ e, end: 'p2' });
+    });
+    svg.querySelectorAll('path').forEach(p => {
+      if (p.closest('.fig-edit-overlay') || p.closest('.fe-preview')) return;
+      const d = (p.getAttribute('d') || '').trim();
+      const m2 = d.match(/^M\s*([-\d.]+)[,\s]+([-\d.]+)\s*L\s*([-\d.]+)[,\s]+([-\d.]+)$/i);
+      if (m2) {
+        const p1 = { x: +m2[1], y: +m2[2] }, p2 = { x: +m2[3], y: +m2[4] };
+        const n1 = getNode(p1.x, p1.y), n2 = getNode(p2.x, p2.y);
+        const e = { el: p, kind: 'path2', p1, p2, n1, n2, texts: [] };
+        edges.push(e); n1.refs.push({ e, end: 'p1' }); n2.refs.push({ e, end: 'p2' });
+      } else if (/^M[\s\d.,L-]+Z$/i.test(d)) {
+        const pts = [...d.matchAll(/([-\d.]+)[,\s]+([-\d.]+)/g)].map(m => [+m[1], +m[2]]);
+        if (pts.length >= 3) {
+          const poly = { el: p, kind: 'pathPoly', pts };
+          polys.push(poly); pts.forEach((pt, idx) => getNode(pt[0], pt[1]).refs.push({ poly, idx }));
+        }
+      } else {
+        const pts = [...d.matchAll(/([-\d.]+)[,\s]+([-\d.]+)/g)].map(m => [+m[1], +m[2]]);
+        if (pts.length >= 2 && pts.length <= 4) {
+          const span = Math.hypot(pts[pts.length-1][0] - pts[0][0], pts[pts.length-1][1] - pts[0][1]);
+          if (span < 22) {
+            const nearN = nodes.find(n => Math.hypot(n.x - pts[0][0], n.y - pts[0][1]) < 24);
+            if (nearN) nearN.decos.push({ el: p, dx: 0, dy: 0 });
+          }
+        }
+      }
+    });
+    svg.querySelectorAll('polygon, polyline').forEach(pl => {
+      if (pl.closest('.fig-edit-overlay') || pl.closest('.fe-preview')) return;
+      const pts = parsePts(pl.getAttribute('points'));
+      if (pts.length >= 2) {
+        const poly = { el: pl, kind: 'poly', pts };
+        polys.push(poly); pts.forEach((pt, idx) => getNode(pt[0], pt[1]).refs.push({ poly, idx }));
+      }
+    });
+    nodes.forEach(m => {
+      edges.forEach(e => {
+        if (e.n1 === m || e.n2 === m) return;
+        const vx = e.n2.x - e.n1.x, vy = e.n2.y - e.n1.y, len2 = vx * vx + vy * vy;
+        if (len2 < 100) return;
+        const t = ((m.x - e.n1.x) * vx + (m.y - e.n1.y) * vy) / len2;
+        if (t > 0.04 && t < 0.96) {
+          const px = e.n1.x + t * vx, py = e.n1.y + t * vy;
+          if (Math.hypot(m.x - px, m.y - py) <= 1.8) m.parentSeg = { n1: e.n1, n2: e.n2, t };
+        }
+      });
+    });
+    svg.querySelectorAll('text').forEach(t => {
+      if (t.closest('.fig-edit-overlay') || t.closest('.fe-preview')) return;
+      let tx = parseFloat(t.getAttribute('x') || '0'), ty = parseFloat(t.getAttribute('y') || '0');
+      try { const bb = t.getBBox(); if (bb.width > 0) { tx = bb.x + bb.width / 2; ty = bb.y + bb.height / 2; } } catch (_) {}
+      let bestN = null, dN = 34, bestE = null, dE = 26;
+      nodes.forEach(n => { const d = Math.hypot(tx - n.x, ty - n.y); if (d < dN) { dN = d; bestN = n; } });
+      edges.forEach(e => { const mx = (e.p1.x + e.p2.x) / 2, my = (e.p1.y + e.p2.y) / 2, d = Math.hypot(tx - mx, ty - my); if (d < dE) { dE = d; bestE = e; } });
+      if (bestN && dN <= dE + 4) bestN.texts.push(t);
+      else if (bestE) bestE.texts.push({ el: t, dx: tx - (bestE.p1.x + bestE.p2.x) / 2, dy: ty - (bestE.p1.y + bestE.p2.y) / 2, ax: parseFloat(t.getAttribute('x') || '0') - tx, ay: parseFloat(t.getAttribute('y') || '0') - ty });
+    });
+    const cycles = findClosedCycles(nodes, edges, polys);
+    return { nodes, edges, polys, shapes, cycles };
+  }
+
+  function syncEdge(e) {
+    if (e.kind === 'line') {
+      e.el.setAttribute('x1', e.p1.x.toFixed(2)); e.el.setAttribute('y1', e.p1.y.toFixed(2));
+      e.el.setAttribute('x2', e.p2.x.toFixed(2)); e.el.setAttribute('y2', e.p2.y.toFixed(2));
+    } else if (e.kind === 'path2') {
+      e.el.setAttribute('d', `M ${e.p1.x.toFixed(2)} ${e.p1.y.toFixed(2)} L ${e.p2.x.toFixed(2)} ${e.p2.y.toFixed(2)}`);
+    }
+    const mx = (e.p1.x + e.p2.x) / 2, my = (e.p1.y + e.p2.y) / 2;
+    e.texts.forEach(item => {
+      item.el.setAttribute('x', (mx + item.dx + item.ax).toFixed(2));
+      item.el.setAttribute('y', (my + item.dy + item.ay).toFixed(2));
+    });
+  }
+
+  function syncPoly(poly) {
+    if (poly.kind === 'poly') poly.el.setAttribute('points', fmtPts(poly.pts));
+    else poly.el.setAttribute('d', 'M ' + poly.pts.map(p => `${p[0].toFixed(2)} ${p[1].toFixed(2)}`).join(' L ') + ' Z');
+  }
+
+  function moveNodeTo(n, nx, ny, allNodes, visited) {
+    if (visited.has(n)) return;
+    visited.add(n);
+    const dx = nx - n.x, dy = ny - n.y;
+    n.x = nx; n.y = ny;
+    if (n.handle) { n.handle.setAttribute('cx', n.x.toFixed(2)); n.handle.setAttribute('cy', n.y.toFixed(2)); }
+    n.dots.forEach(c => { c.setAttribute('cx', n.x.toFixed(2)); c.setAttribute('cy', n.y.toFixed(2)); });
+    n.refs.forEach(r => {
+      if (r.e) { r.e[r.end].x = n.x; r.e[r.end].y = n.y; syncEdge(r.e); }
+      if (r.poly) { r.poly.pts[r.idx] = [n.x, n.y]; syncPoly(r.poly); }
+    });
+    n.texts.forEach(t => {
+      t.setAttribute('x', (parseFloat(t.getAttribute('x') || '0') + dx).toFixed(2));
+      t.setAttribute('y', (parseFloat(t.getAttribute('y') || '0') + dy).toFixed(2));
+    });
+    n.decos.forEach(dc => {
+      dc.dx += dx; dc.dy += dy;
+      dc.el.setAttribute('transform', `translate(${dc.dx.toFixed(2)}, ${dc.dy.toFixed(2)})`);
+    });
+    allNodes.forEach(child => {
+      if (child.parentSeg && (child.parentSeg.n1 === n || child.parentSeg.n2 === n)) {
+        const s = child.parentSeg;
+        moveNodeTo(child, s.n1.x + s.t * (s.n2.x - s.n1.x), s.n1.y + s.t * (s.n2.y - s.n1.y), allNodes, visited);
+      }
+    });
+  }
+
+  function moveNodeGroup(nodesToMove, dx, dy, allNodes) {
+    const movedSet = new Set(nodesToMove);
+    const edgesToSync = new Set();
+    const polysToSync = new Set();
+    nodesToMove.forEach(n => {
+      n.x += dx; n.y += dy;
+      if (n.handle) { n.handle.setAttribute('cx', n.x.toFixed(2)); n.handle.setAttribute('cy', n.y.toFixed(2)); }
+      n.dots.forEach(c => { c.setAttribute('cx', n.x.toFixed(2)); c.setAttribute('cy', n.y.toFixed(2)); });
+      n.refs.forEach(r => {
+        if (r.e) { r.e[r.end].x = n.x; r.e[r.end].y = n.y; edgesToSync.add(r.e); }
+        if (r.poly) { r.poly.pts[r.idx] = [n.x, n.y]; polysToSync.add(r.poly); }
+      });
+      n.texts.forEach(t => {
+        t.setAttribute('x', (parseFloat(t.getAttribute('x') || '0') + dx).toFixed(2));
+        t.setAttribute('y', (parseFloat(t.getAttribute('y') || '0') + dy).toFixed(2));
+      });
+      n.decos.forEach(dc => {
+        dc.dx += dx; dc.dy += dy;
+        dc.el.setAttribute('transform', `translate(${dc.dx.toFixed(2)}, ${dc.dy.toFixed(2)})`);
+      });
+    });
+    edgesToSync.forEach(syncEdge);
+    polysToSync.forEach(syncPoly);
+    allNodes.forEach(child => {
+      if (!movedSet.has(child) && child.parentSeg && (movedSet.has(child.parentSeg.n1) || movedSet.has(child.parentSeg.n2))) {
+        const s = child.parentSeg;
+        moveNodeTo(child, s.n1.x + s.t * (s.n2.x - s.n1.x), s.n1.y + s.t * (s.n2.y - s.n1.y), allNodes, new Set(movedSet));
+      }
+    });
+  }
+
+  function computeShapeSpec(type, x0, y0, x1, y1) {
+    let dx = x1 - x0, dy = y1 - y0;
+    if (Math.hypot(dx, dy) < 5) { x0 -= 32; y0 -= 32; x1 = x0 + 64; y1 = y0 + 64; dx = 64; dy = 64; }
+    const w = Math.abs(dx), h = Math.abs(dy);
+    const sx = dx >= 0 ? 1 : -1, sy = dy >= 0 ? 1 : -1;
+    const minX = Math.min(x0, x1), maxX = Math.max(x0, x1);
+    const minY = Math.min(y0, y1), maxY = Math.max(y0, y1);
+    const mx = (minX + maxX) / 2, my = (minY + maxY) / 2;
+    if (type === 'circle') return { kind: 'circle', cx: mx, cy: my, r: Math.max(w, h) / 2 };
+    if (type === 'ellipse') return { kind: 'ellipse', cx: mx, cy: my, rx: Math.max(4, w / 2), ry: Math.max(4, h / 2) };
+    let pts = [];
+    if (type === 'square') { const s = Math.max(w, h); pts = [[x0, y0], [x0 + sx * s, y0], [x0 + sx * s, y0 + sy * s], [x0, y0 + sy * s]]; }
+    else if (type === 'rect') pts = [[minX, minY], [maxX, minY], [maxX, maxY], [minX, maxY]];
+    else if (type === 'parallelogram') { const sk = (maxX - minX) * 0.28; pts = [[minX + sk, minY], [maxX, minY], [maxX - sk, maxY], [minX, maxY]]; }
+    else if (type === 'rhombus') pts = [[mx, minY], [maxX, my], [mx, maxY], [minX, my]];
+    else if (type === 'triangle') pts = [[minX + (maxX - minX) * 0.32, minY], [minX, maxY], [maxX, maxY]];
+    else if (type === 'iso_triangle') pts = [[mx, minY], [minX, maxY], [maxX, maxY]];
+    else if (type === 'equi_triangle') { const s = Math.max(w, h), hh = s * Math.sqrt(3) / 2; pts = [[x0 + sx * s / 2, y0], [x0, y0 + sy * hh], [x0 + sx * s, y0 + sy * hh]]; }
+    return { kind: 'poly', pts };
+  }
+
+  function commitShape(svg, box, spec) {
+    saveSnapshot(box);
+    const ov = svg.querySelector('.fig-edit-overlay');
+    const dashAttr = state.newDash ? { 'stroke-dasharray': '5,4' } : {};
+    if (spec.kind === 'circle') {
+      const c = el('circle', Object.assign({ cx: spec.cx.toFixed(2), cy: spec.cy.toFixed(2), r: spec.r.toFixed(2), fill: 'none', stroke: '#111111', 'stroke-width': '1.5' }, dashAttr));
+      svg.insertBefore(c, ov || null);
+      state.selEdge = c; state.selNode = null; state.selBlock = null; state.selBox = box; updateSelectionBars();
+    } else if (spec.kind === 'ellipse') {
+      const ep = el('ellipse', Object.assign({ cx: spec.cx.toFixed(2), cy: spec.cy.toFixed(2), rx: spec.rx.toFixed(2), ry: spec.ry.toFixed(2), fill: 'none', stroke: '#111111', 'stroke-width': '1.5' }, dashAttr));
+      svg.insertBefore(ep, ov || null);
+      state.selEdge = ep; state.selNode = null; state.selBlock = null; state.selBox = box; updateSelectionBars();
+    } else if (spec.kind === 'poly' && spec.pts.length >= 3) {
+      const pts = spec.pts;
+      for (let i = 0; i < pts.length; i++) {
+        const a = pts[i], b = pts[(i + 1) % pts.length];
+        const ln = el('line', Object.assign({ x1: a[0].toFixed(2), y1: a[1].toFixed(2), x2: b[0].toFixed(2), y2: b[1].toFixed(2), stroke: '#111111', 'stroke-width': '1.5' }, dashAttr));
+        svg.insertBefore(ln, ov || null);
+      }
+      state.selBlock = pts.map(p => ({ x: p[0], y: p[1] })); state.selEdge = null; state.selNode = null; state.selBox = box; updateSelectionBars();
+    }
+    expandViewBoxIfNeeded(svg);
+    window.setFigTool('select');
+  }
+
+  function duplicateElement(svg, targetEl, box) {
+    if (!svg || !targetEl || !box) return;
+    saveSnapshot(box);
+    const ov = svg.querySelector('.fig-edit-overlay');
+    const off = 16, tag = targetEl.tagName.toLowerCase();
+    if (tag === 'line') {
+      const attrs = { x1: (+targetEl.getAttribute('x1') + off).toFixed(2), y1: (+targetEl.getAttribute('y1') + off).toFixed(2), x2: (+targetEl.getAttribute('x2') + off).toFixed(2), y2: (+targetEl.getAttribute('y2') + off).toFixed(2), stroke: targetEl.getAttribute('stroke') || '#111111', 'stroke-width': targetEl.getAttribute('stroke-width') || '1.5' };
+      const dash = targetEl.getAttribute('stroke-dasharray');
+      if (dash && dash !== 'none') attrs['stroke-dasharray'] = dash;
+      const copyLine = el('line', attrs);
+      svg.insertBefore(copyLine, ov || null);
+      state.selEdge = copyLine; state.selNode = null; state.selBlock = null; state.selBox = box;
+    } else if (tag === 'circle' || tag === 'ellipse') {
+      const copyS = targetEl.cloneNode(true);
+      copyS.setAttribute('cx', (+targetEl.getAttribute('cx') + off).toFixed(2));
+      copyS.setAttribute('cy', (+targetEl.getAttribute('cy') + off).toFixed(2));
+      svg.insertBefore(copyS, ov || null);
+      state.selEdge = copyS; state.selNode = null; state.selBlock = null; state.selBox = box;
+    }
+    updateSelectionBars(); expandViewBoxIfNeeded(svg); mountBox(box);
+  }
+
+  function snapPoint(svg, pt) {
+    let best = { x: pt.x, y: pt.y }, minD = 7;
+    svg.querySelectorAll('circle').forEach(c => {
+      if (c.closest('.fig-edit-overlay') || c.closest('.fe-preview')) return;
+      const r = parseFloat(c.getAttribute('r') || '0');
+      if (r > 0 && r <= 6) {
+        const cx = +c.getAttribute('cx'), cy = +c.getAttribute('cy'), d = Math.hypot(cx - pt.x, cy - pt.y);
+        if (d < minD) { minD = d; best = { x: cx, y: cy }; }
+      }
+    });
+    svg.querySelectorAll('line').forEach(l => {
+      if (l.closest('.fig-edit-overlay') || l.closest('.fe-preview')) return;
+      [[+l.getAttribute('x1'), +l.getAttribute('y1')], [+l.getAttribute('x2'), +l.getAttribute('y2')]].forEach(([ex, ey]) => {
+        const d = Math.hypot(ex - pt.x, ey - pt.y);
+        if (d < minD) { minD = d; best = { x: ex, y: ey }; }
+      });
+    });
+    return best;
+  }
+
+  function isSameBlock(cycleNodes, selBlock) {
+    if (!selBlock || selBlock.length !== cycleNodes.length) return false;
+    return cycleNodes.every(n => selBlock.some(s => Math.hypot(s.x - n.x, s.y - n.y) <= 2.8));
+  }
+
+  function mountBox(box) {
+    const svg = box.querySelector('svg');
+    if (!svg) return;
+    if (!state.originals.has(box)) {
+      const cleanOrig = box.cloneNode(true);
+      cleanOrig.querySelectorAll('.fig-edit-overlay, .fe-preview').forEach(o => o.remove());
+      state.originals.set(box, cleanOrig.innerHTML);
+    }
+    svg.querySelectorAll('.fig-edit-overlay, .fe-preview').forEach(o => o.remove());
+    const g = buildGraph(svg);
+    const ov = el('g', { class: 'fig-edit-overlay' });
+
+    if (!boundBoxes.has(box)) {
+      boundBoxes.add(box);
+      box.addEventListener('pointerdown', ev => {
+        if (!state.active) return;
+        setActiveBox(box);
+        const curSvg = box.querySelector('svg');
+        if (!curSvg || ev.target.closest('.fig-edit-overlay')) return;
+
+        if (state.tool === 'drawedge') {
+          ev.stopPropagation();
+          const p0 = snapPoint(curSvg, ptSvg(curSvg, ev.clientX, ev.clientY));
+          let p1 = { x: p0.x, y: p0.y };
+          const prevG = el('g', { class: 'fe-preview' });
+          const prevLine = el('line', { x1: p0.x, y1: p0.y, x2: p1.x, y2: p1.y, stroke: '#2563eb', 'stroke-width': '1.6', 'stroke-dasharray': state.newDash ? '5,4' : '3,2' });
+          prevG.appendChild(prevLine); curSvg.appendChild(prevG);
+          box.setPointerCapture(ev.pointerId);
+          const onMove = mv => { p1 = snapPoint(curSvg, ptSvg(curSvg, mv.clientX, mv.clientY)); prevLine.setAttribute('x2', p1.x.toFixed(2)); prevLine.setAttribute('y2', p1.y.toFixed(2)); };
+          const onUp = () => {
+            box.removeEventListener('pointermove', onMove); box.removeEventListener('pointerup', onUp); prevG.remove();
+            if (Math.hypot(p1.x - p0.x, p1.y - p0.y) < 4) p1 = { x: p0.x + 60, y: p0.y };
+            saveSnapshot(box);
+            const curOv = curSvg.querySelector('.fig-edit-overlay');
+            const attrs = { x1: p0.x.toFixed(2), y1: p0.y.toFixed(2), x2: p1.x.toFixed(2), y2: p1.y.toFixed(2), stroke: '#111111', 'stroke-width': '1.5' };
+            if (state.newDash) attrs['stroke-dasharray'] = '5,4';
+            const newLine = el('line', attrs);
+            curSvg.insertBefore(newLine, curOv || null);
+            state.selEdge = newLine; state.selNode = null; state.selBlock = null; state.selBox = box;
+            updateSelectionBars(); expandViewBoxIfNeeded(curSvg); mountBox(box);
+          };
+          box.addEventListener('pointermove', onMove); box.addEventListener('pointerup', onUp);
+          return;
+        }
+
+        if (state.tool === 'shape') {
+          ev.stopPropagation();
+          const p0 = ptSvg(curSvg, ev.clientX, ev.clientY);
+          let p1 = { x: p0.x, y: p0.y };
+          const prevG = el('g', { class: 'fe-preview' });
+          curSvg.appendChild(prevG); box.setPointerCapture(ev.pointerId);
+          const renderPreview = () => {
+            prevG.innerHTML = '';
+            const spec = computeShapeSpec(state.shapeType, p0.x, p0.y, p1.x, p1.y);
+            if (spec.kind === 'circle') prevG.appendChild(el('circle', { cx: spec.cx, cy: spec.cy, r: spec.r, fill: 'rgba(37,99,235,0.08)', stroke: '#2563eb', 'stroke-width': '1.5', 'stroke-dasharray': '4,3' }));
+            else if (spec.kind === 'ellipse') prevG.appendChild(el('ellipse', { cx: spec.cx, cy: spec.cy, rx: spec.rx, ry: spec.ry, fill: 'rgba(37,99,235,0.08)', stroke: '#2563eb', 'stroke-width': '1.5', 'stroke-dasharray': '4,3' }));
+            else if (spec.kind === 'poly') prevG.appendChild(el('polygon', { points: fmtPts(spec.pts), fill: 'rgba(37,99,235,0.08)', stroke: '#2563eb', 'stroke-width': '1.5', 'stroke-dasharray': '4,3' }));
+          };
+          renderPreview();
+          const onMove = mv => { p1 = ptSvg(curSvg, mv.clientX, mv.clientY); renderPreview(); };
+          const onUp = () => { box.removeEventListener('pointermove', onMove); box.removeEventListener('pointerup', onUp); prevG.remove(); commitShape(curSvg, box, computeShapeSpec(state.shapeType, p0.x, p0.y, p1.x, p1.y)); };
+          box.addEventListener('pointermove', onMove); box.addEventListener('pointerup', onUp);
+        }
+      });
+
+      box.addEventListener('click', ev => {
+        if (!state.active || state.tool !== 'addpt') return;
+        setActiveBox(box);
+        const curSvg = box.querySelector('svg');
+        if (!curSvg || ev.target.closest('.fig-edit-overlay')) return;
+        saveSnapshot(box);
+        const p = ptSvg(curSvg, ev.clientX, ev.clientY);
+        const dot = el('circle', { cx: p.x.toFixed(2), cy: p.y.toFixed(2), r: 2.6, fill: '#111111' });
+        curSvg.insertBefore(dot, curSvg.querySelector('.fig-edit-overlay') || null);
+        state.selNode = { x: p.x, y: p.y }; state.selEdge = null; state.selBlock = null; state.selBox = box;
+        updateSelectionBars(); expandViewBoxIfNeeded(curSvg); mountBox(box);
+      });
+    }
+
+    const canDragBlock = state.tool === 'select' || state.tool === 'moveblock';
+    g.cycles.forEach(cycleNodes => {
+      const selected = state.selBox === box && isSameBlock(cycleNodes, state.selBlock);
+      const hitPoly = el('polygon', { points: fmtPts(cycleNodes.map(n => [n.x, n.y])), fill: selected ? 'rgba(37,99,235,0.10)' : 'transparent', stroke: selected ? '#2563eb' : 'none', 'stroke-width': selected ? '1' : '0', 'stroke-dasharray': '3,2', style: canDragBlock ? 'cursor:move' : 'pointer-events:none' });
+      hitPoly.addEventListener('pointerenter', () => { if (canDragBlock) hitPoly.setAttribute('fill', 'rgba(37,99,235,0.08)'); });
+      hitPoly.addEventListener('pointerleave', () => { const stillSel = state.selBox === box && isSameBlock(cycleNodes, state.selBlock); hitPoly.setAttribute('fill', stillSel ? 'rgba(37,99,235,0.10)' : 'transparent'); });
+      hitPoly.addEventListener('pointerdown', ev => {
+        if (!canDragBlock) return;
+        ev.stopPropagation(); setActiveBox(box); hitPoly.setPointerCapture(ev.pointerId);
+        const targetNodes = state.tool === 'moveblock' ? getConnectedComponent(cycleNodes, g) : cycleNodes;
+        const targetSet = new Set(targetNodes);
+        const startClient = { x: ev.clientX, y: ev.clientY };
+        let prevSvg = ptSvg(svg, ev.clientX, ev.clientY), moved = false;
+        const onMove = mv => {
+          if (!moved && Math.hypot(mv.clientX - startClient.x, mv.clientY - startClient.y) >= 3.5) {
+            moved = true; saveSnapshot(box);
+            targetNodes.forEach(nd => { if (nd.parentSeg && (!targetSet.has(nd.parentSeg.n1) || !targetSet.has(nd.parentSeg.n2))) nd.parentSeg = null; });
+          }
+          if (moved) {
+            const curSvg = ptSvg(svg, mv.clientX, mv.clientY);
+            moveNodeGroup(targetNodes, curSvg.x - prevSvg.x, curSvg.y - prevSvg.y, g.nodes);
+            prevSvg = curSvg;
+            hitPoly.setAttribute('points', fmtPts(cycleNodes.map(n => [n.x, n.y])));
+          }
+        };
+        const onUp = () => {
+          hitPoly.removeEventListener('pointermove', onMove); hitPoly.removeEventListener('pointerup', onUp);
+          state.selBlock = cycleNodes.map(n => ({ x: n.x, y: n.y })); state.selEdge = null; state.selNode = null; state.selBox = box;
+          updateSelectionBars(); if (moved) expandViewBoxIfNeeded(svg); mountBox(box);
+        };
+        hitPoly.addEventListener('pointermove', onMove); hitPoly.addEventListener('pointerup', onUp);
+      });
+      ov.appendChild(hitPoly);
+    });
+
+    g.edges.forEach(e => {
+      const isSel = state.selEdge === e.el;
+      const hit = el('line', { x1: e.p1.x, y1: e.p1.y, x2: e.p2.x, y2: e.p2.y, stroke: isSel ? 'rgba(37,99,235,0.28)' : 'transparent', 'stroke-width': 13, style: state.tool === 'copyedge' ? 'cursor:copy' : (canDragBlock ? 'cursor:move' : 'cursor:pointer') });
+      hit.addEventListener('pointerdown', ev => {
+        ev.stopPropagation(); setActiveBox(box);
+        if (state.tool === 'copyedge') { duplicateElement(svg, e.el, box); return; }
+        if (!canDragBlock) return;
+        hit.setPointerCapture(ev.pointerId);
+        const dragNodes = state.tool === 'moveblock' ? getConnectedComponent([e.n1, e.n2], g) : [e.n1, e.n2];
+        const dragSet = new Set(dragNodes);
+        const startClient = { x: ev.clientX, y: ev.clientY };
+        let prevSvg = ptSvg(svg, ev.clientX, ev.clientY), moved = false;
+        const onMove = mv => {
+          if (!moved && Math.hypot(mv.clientX - startClient.x, mv.clientY - startClient.y) >= 3.5) {
+            moved = true; saveSnapshot(box);
+            dragNodes.forEach(nd => { if (nd.parentSeg && (!dragSet.has(nd.parentSeg.n1) || !dragSet.has(nd.parentSeg.n2))) nd.parentSeg = null; });
+          }
+          if (moved) {
+            const curSvg = ptSvg(svg, mv.clientX, mv.clientY);
+            moveNodeGroup(dragNodes, curSvg.x - prevSvg.x, curSvg.y - prevSvg.y, g.nodes);
+            prevSvg = curSvg;
+            hit.setAttribute('x1', e.p1.x.toFixed(2)); hit.setAttribute('y1', e.p1.y.toFixed(2)); hit.setAttribute('x2', e.p2.x.toFixed(2)); hit.setAttribute('y2', e.p2.y.toFixed(2));
+          }
+        };
+        const onUp = () => {
+          hit.removeEventListener('pointermove', onMove); hit.removeEventListener('pointerup', onUp);
+          if (!moved) {
+            saveSnapshot(box);
+            const cur = e.el.getAttribute('stroke-dasharray') || getComputedStyle(e.el).strokeDasharray;
+            const isDashed = cur && cur !== 'none' && cur !== '';
+            if (isDashed) { e.el.removeAttribute('stroke-dasharray'); e.el.style.strokeDasharray = 'none'; }
+            else { e.el.setAttribute('stroke-dasharray', '5,4'); e.el.style.strokeDasharray = '5,4'; }
+          } else { expandViewBoxIfNeeded(svg); }
+          state.selEdge = e.el; state.selNode = null; state.selBlock = null; state.selBox = box;
+          updateSelectionBars(); mountBox(box);
+        };
+        hit.addEventListener('pointermove', onMove); hit.addEventListener('pointerup', onUp);
+      });
+      ov.appendChild(hit);
+    });
+
+    g.shapes.forEach(sh => {
+      const isSel = state.selEdge === sh.el;
+      if (sh.kind === 'circle') {
+        const hitC = el('circle', { cx: sh.cx, cy: sh.cy, r: sh.r, fill: 'transparent', stroke: isSel ? 'rgba(37,99,235,0.28)' : 'transparent', 'stroke-width': 12, style: state.tool === 'copyedge' ? 'cursor:copy' : (canDragBlock ? 'cursor:move' : 'cursor:pointer') });
+        const cHandle = el('circle', { cx: sh.cx, cy: sh.cy, r: 5, fill: 'rgba(37,99,235,0.22)', stroke: '#2563eb', 'stroke-width': 1.6, style: 'cursor:move' });
+        const rHandle = el('circle', { cx: sh.cx + sh.r, cy: sh.cy, r: 4.5, fill: 'rgba(16,185,129,0.25)', stroke: '#059669', 'stroke-width': 1.6, style: 'cursor:ew-resize' });
+        hitC.addEventListener('pointerdown', ev => {
+          ev.stopPropagation(); setActiveBox(box);
+          if (state.tool === 'copyedge') { duplicateElement(svg, sh.el, box); return; }
+          if (!canDragBlock) return;
+          hitC.setPointerCapture(ev.pointerId);
+          const startClient = { x: ev.clientX, y: ev.clientY };
+          let prev = ptSvg(svg, ev.clientX, ev.clientY), moved = false;
+          const onMove = mv => {
+            if (!moved && Math.hypot(mv.clientX - startClient.x, mv.clientY - startClient.y) >= 3.5) { moved = true; saveSnapshot(box); }
+            if (moved) {
+              const cur = ptSvg(svg, mv.clientX, mv.clientY);
+              sh.cx += cur.x - prev.x; sh.cy += cur.y - prev.y; prev = cur;
+              sh.el.setAttribute('cx', sh.cx.toFixed(2)); sh.el.setAttribute('cy', sh.cy.toFixed(2));
+              hitC.setAttribute('cx', sh.cx.toFixed(2)); hitC.setAttribute('cy', sh.cy.toFixed(2));
+              cHandle.setAttribute('cx', sh.cx.toFixed(2)); cHandle.setAttribute('cy', sh.cy.toFixed(2));
+              rHandle.setAttribute('cx', (sh.cx + sh.r).toFixed(2)); rHandle.setAttribute('cy', sh.cy.toFixed(2));
+            }
+          };
+          const onUp = () => {
+            hitC.removeEventListener('pointermove', onMove); hitC.removeEventListener('pointerup', onUp);
+            if (!moved) {
+              saveSnapshot(box);
+              const cur = sh.el.getAttribute('stroke-dasharray') || getComputedStyle(sh.el).strokeDasharray;
+              const isDashed = cur && cur !== 'none' && cur !== '';
+              if (isDashed) { sh.el.removeAttribute('stroke-dasharray'); sh.el.style.strokeDasharray = 'none'; }
+              else { sh.el.setAttribute('stroke-dasharray', '5,4'); sh.el.style.strokeDasharray = '5,4'; }
+            } else { expandViewBoxIfNeeded(svg); }
+            state.selEdge = sh.el; state.selNode = null; state.selBlock = null; state.selBox = box; updateSelectionBars(); mountBox(box);
+          };
+          hitC.addEventListener('pointermove', onMove); hitC.addEventListener('pointerup', onUp);
+        });
+        ov.appendChild(hitC);
+        cHandle.addEventListener('pointerdown', ev => {
+          if (!canDragBlock) return;
+          ev.stopPropagation(); saveSnapshot(box); cHandle.setPointerCapture(ev.pointerId);
+          let prev = ptSvg(svg, ev.clientX, ev.clientY);
+          const onMove = mv => {
+            const cur = ptSvg(svg, mv.clientX, mv.clientY);
+            sh.cx += cur.x - prev.x; sh.cy += cur.y - prev.y; prev = cur;
+            sh.el.setAttribute('cx', sh.cx.toFixed(2)); sh.el.setAttribute('cy', sh.cy.toFixed(2));
+            hitC.setAttribute('cx', sh.cx.toFixed(2)); hitC.setAttribute('cy', sh.cy.toFixed(2));
+            cHandle.setAttribute('cx', sh.cx.toFixed(2)); cHandle.setAttribute('cy', sh.cy.toFixed(2));
+            rHandle.setAttribute('cx', (sh.cx + sh.r).toFixed(2)); rHandle.setAttribute('cy', sh.cy.toFixed(2));
+          };
+          const onUp = () => { cHandle.removeEventListener('pointermove', onMove); cHandle.removeEventListener('pointerup', onUp); expandViewBoxIfNeeded(svg); mountBox(box); };
+          cHandle.addEventListener('pointermove', onMove); cHandle.addEventListener('pointerup', onUp);
+        });
+        rHandle.addEventListener('pointerdown', ev => {
+          if (!canDragBlock) return;
+          ev.stopPropagation(); saveSnapshot(box); rHandle.setPointerCapture(ev.pointerId);
+          const onMove = mv => {
+            const cur = ptSvg(svg, mv.clientX, mv.clientY);
+            sh.r = Math.max(6, Math.hypot(cur.x - sh.cx, cur.y - sh.cy));
+            sh.el.setAttribute('r', sh.r.toFixed(2)); hitC.setAttribute('r', sh.r.toFixed(2));
+            rHandle.setAttribute('cx', (sh.cx + sh.r).toFixed(2)); rHandle.setAttribute('cy', sh.cy.toFixed(2));
+          };
+          const onUp = () => { rHandle.removeEventListener('pointermove', onMove); rHandle.removeEventListener('pointerup', onUp); expandViewBoxIfNeeded(svg); mountBox(box); };
+          rHandle.addEventListener('pointermove', onMove); rHandle.addEventListener('pointerup', onUp);
+        });
+        ov.appendChild(cHandle); ov.appendChild(rHandle);
+      } else if (sh.kind === 'ellipse') {
+        const hitE = el('ellipse', { cx: sh.cx, cy: sh.cy, rx: sh.rx, ry: sh.ry, fill: 'transparent', stroke: isSel ? 'rgba(37,99,235,0.28)' : 'transparent', 'stroke-width': 12, style: state.tool === 'copyedge' ? 'cursor:copy' : (canDragBlock ? 'cursor:move' : 'cursor:pointer') });
+        const cH = el('circle', { cx: sh.cx, cy: sh.cy, r: 5, fill: 'rgba(37,99,235,0.22)', stroke: '#2563eb', 'stroke-width': 1.6, style: 'cursor:move' });
+        const rxH = el('circle', { cx: sh.cx + sh.rx, cy: sh.cy, r: 4.5, fill: 'rgba(16,185,129,0.25)', stroke: '#059669', 'stroke-width': 1.6, style: 'cursor:ew-resize' });
+        const ryH = el('circle', { cx: sh.cx, cy: sh.cy - sh.ry, r: 4.5, fill: 'rgba(16,185,129,0.25)', stroke: '#059669', 'stroke-width': 1.6, style: 'cursor:ns-resize' });
+        hitE.addEventListener('pointerdown', ev => {
+          ev.stopPropagation(); setActiveBox(box);
+          if (state.tool === 'copyedge') { duplicateElement(svg, sh.el, box); return; }
+          if (!canDragBlock) return;
+          hitE.setPointerCapture(ev.pointerId);
+          const startClient = { x: ev.clientX, y: ev.clientY };
+          let prev = ptSvg(svg, ev.clientX, ev.clientY), moved = false;
+          const onMove = mv => {
+            if (!moved && Math.hypot(mv.clientX - startClient.x, mv.clientY - startClient.y) >= 3.5) { moved = true; saveSnapshot(box); }
+            if (moved) {
+              const cur = ptSvg(svg, mv.clientX, mv.clientY);
+              sh.cx += cur.x - prev.x; sh.cy += cur.y - prev.y; prev = cur;
+              sh.el.setAttribute('cx', sh.cx.toFixed(2)); sh.el.setAttribute('cy', sh.cy.toFixed(2));
+              hitE.setAttribute('cx', sh.cx.toFixed(2)); hitE.setAttribute('cy', sh.cy.toFixed(2));
+              cH.setAttribute('cx', sh.cx.toFixed(2)); cH.setAttribute('cy', sh.cy.toFixed(2));
+              rxH.setAttribute('cx', (sh.cx + sh.rx).toFixed(2)); rxH.setAttribute('cy', sh.cy.toFixed(2));
+              ryH.setAttribute('cx', sh.cx.toFixed(2)); ryH.setAttribute('cy', (sh.cy - sh.ry).toFixed(2));
+            }
+          };
+          const onUp = () => {
+            hitE.removeEventListener('pointermove', onMove); hitE.removeEventListener('pointerup', onUp);
+            if (!moved) {
+              saveSnapshot(box);
+              const cur = sh.el.getAttribute('stroke-dasharray') || getComputedStyle(sh.el).strokeDasharray;
+              const isDashed = cur && cur !== 'none' && cur !== '';
+              if (isDashed) { sh.el.removeAttribute('stroke-dasharray'); sh.el.style.strokeDasharray = 'none'; }
+              else { sh.el.setAttribute('stroke-dasharray', '5,4'); sh.el.style.strokeDasharray = '5,4'; }
+            } else { expandViewBoxIfNeeded(svg); }
+            state.selEdge = sh.el; state.selNode = null; state.selBlock = null; state.selBox = box; updateSelectionBars(); mountBox(box);
+          };
+          hitE.addEventListener('pointermove', onMove); hitE.addEventListener('pointerup', onUp);
+        });
+        ov.appendChild(hitE);
+        cH.addEventListener('pointerdown', ev => {
+          if (!canDragBlock) return;
+          ev.stopPropagation(); saveSnapshot(box); cH.setPointerCapture(ev.pointerId);
+          let prev = ptSvg(svg, ev.clientX, ev.clientY);
+          const onMove = mv => {
+            const cur = ptSvg(svg, mv.clientX, mv.clientY);
+            sh.cx += cur.x - prev.x; sh.cy += cur.y - prev.y; prev = cur;
+            sh.el.setAttribute('cx', sh.cx.toFixed(2)); sh.el.setAttribute('cy', sh.cy.toFixed(2));
+            hitE.setAttribute('cx', sh.cx.toFixed(2)); hitE.setAttribute('cy', sh.cy.toFixed(2));
+            cH.setAttribute('cx', sh.cx.toFixed(2)); cH.setAttribute('cy', sh.cy.toFixed(2));
+            rxH.setAttribute('cx', (sh.cx + sh.rx).toFixed(2)); rxH.setAttribute('cy', sh.cy.toFixed(2));
+            ryH.setAttribute('cx', sh.cx.toFixed(2)); ryH.setAttribute('cy', (sh.cy - sh.ry).toFixed(2));
+          };
+          const onUp = () => { cH.removeEventListener('pointermove', onMove); cH.removeEventListener('pointerup', onUp); expandViewBoxIfNeeded(svg); mountBox(box); };
+          cH.addEventListener('pointermove', onMove); cH.addEventListener('pointerup', onUp);
+        });
+        rxH.addEventListener('pointerdown', ev => {
+          if (!canDragBlock) return;
+          ev.stopPropagation(); saveSnapshot(box); rxH.setPointerCapture(ev.pointerId);
+          const onMove = mv => { const cur = ptSvg(svg, mv.clientX, mv.clientY); sh.rx = Math.max(5, Math.abs(cur.x - sh.cx)); sh.el.setAttribute('rx', sh.rx.toFixed(2)); hitE.setAttribute('rx', sh.rx.toFixed(2)); rxH.setAttribute('cx', (sh.cx + sh.rx).toFixed(2)); };
+          const onUp = () => { rxH.removeEventListener('pointermove', onMove); rxH.removeEventListener('pointerup', onUp); expandViewBoxIfNeeded(svg); mountBox(box); };
+          rxH.addEventListener('pointermove', onMove); rxH.addEventListener('pointerup', onUp);
+        });
+        ryH.addEventListener('pointerdown', ev => {
+          if (!canDragBlock) return;
+          ev.stopPropagation(); saveSnapshot(box); ryH.setPointerCapture(ev.pointerId);
+          const onMove = mv => { const cur = ptSvg(svg, mv.clientX, mv.clientY); sh.ry = Math.max(5, Math.abs(cur.y - sh.cy)); sh.el.setAttribute('ry', sh.ry.toFixed(2)); hitE.setAttribute('ry', sh.ry.toFixed(2)); ryH.setAttribute('cy', (sh.cy - sh.ry).toFixed(2)); };
+          const onUp = () => { ryH.removeEventListener('pointermove', onMove); ryH.removeEventListener('pointerup', onUp); expandViewBoxIfNeeded(svg); mountBox(box); };
+          ryH.addEventListener('pointermove', onMove); ryH.addEventListener('pointerup', onUp);
+        });
+        ov.appendChild(cH); ov.appendChild(rxH); ov.appendChild(ryH);
+      }
+    });
+
+    g.nodes.forEach(n => {
+      const isPending = state.pendingNode && state.pendingNode.box === box && Math.hypot(state.pendingNode.x - n.x, state.pendingNode.y - n.y) < 2.5;
+      const isSelNode = state.selNode && state.selBox === box && Math.hypot(state.selNode.x - n.x, state.selNode.y - n.y) < 2.5;
+      const fillCol = isPending ? 'rgba(234,88,12,0.38)' : (isSelNode ? 'rgba(220,38,38,0.34)' : 'rgba(37,99,235,0.22)');
+      const strokeCol = isPending ? '#ea580c' : (isSelNode ? '#dc2626' : '#2563eb');
+      const h = el('circle', { cx: n.x, cy: n.y, r: 5.5, fill: fillCol, stroke: strokeCol, 'stroke-width': 1.8, style: 'cursor:move' });
+      n.handle = h;
+      h.addEventListener('pointerdown', ev => {
+        ev.stopPropagation(); setActiveBox(box);
+        if (state.tool === 'connect') {
+          if (!state.pendingNode || state.pendingNode.box !== box) { state.pendingNode = { box, x: n.x, y: n.y }; mountBox(box); }
+          else if (Math.hypot(state.pendingNode.x - n.x, state.pendingNode.y - n.y) > 2.5) {
+            saveSnapshot(box);
+            const attrs = { x1: state.pendingNode.x.toFixed(2), y1: state.pendingNode.y.toFixed(2), x2: n.x.toFixed(2), y2: n.y.toFixed(2), stroke: '#111111', 'stroke-width': 1.5 };
+            if (state.newDash) attrs['stroke-dasharray'] = '5,4';
+            svg.insertBefore(el('line', attrs), ov);
+            state.pendingNode = null; mountBox(box);
+          }
+          return;
+        }
+        if (!canDragBlock) return;
+        h.setPointerCapture(ev.pointerId);
+        const compNodes = state.tool === 'moveblock' ? getConnectedComponent([n], g) : null;
+        const startClient = { x: ev.clientX, y: ev.clientY };
+        let prev = ptSvg(svg, ev.clientX, ev.clientY), moved = false;
+        const onMove = mv => {
+          if (!moved && Math.hypot(mv.clientX - startClient.x, mv.clientY - startClient.y) >= 3.5) { moved = true; saveSnapshot(box); if (!compNodes) n.parentSeg = null; }
+          if (moved) {
+            const cur = ptSvg(svg, mv.clientX, mv.clientY);
+            const dx = cur.x - prev.x, dy = cur.y - prev.y; prev = cur;
+            if (compNodes) moveNodeGroup(compNodes, dx, dy, g.nodes);
+            else moveNodeTo(n, n.x + dx, n.y + dy, g.nodes, new Set());
+          }
+        };
+        const onUp = () => {
+          h.removeEventListener('pointermove', onMove); h.removeEventListener('pointerup', onUp);
+          state.selNode = { x: n.x, y: n.y }; state.selEdge = null; state.selBlock = null; state.selBox = box;
+          updateSelectionBars(); if (moved) expandViewBoxIfNeeded(svg); mountBox(box);
+        };
+        h.addEventListener('pointermove', onMove); h.addEventListener('pointerup', onUp);
+      });
+      ov.appendChild(h);
+    });
+
+    svg.querySelectorAll('text').forEach(t => {
+      if (boundTexts.has(t)) return;
+      boundTexts.add(t);
+      t.addEventListener('pointerdown', ev => {
+        if (!state.active) return;
+        ev.stopPropagation(); setActiveBox(box); saveSnapshot(box); t.setPointerCapture(ev.pointerId);
+        let prev = ptSvg(svg, ev.clientX, ev.clientY);
+        const onMove = mv => {
+          const cur = ptSvg(svg, mv.clientX, mv.clientY);
+          t.setAttribute('x', (parseFloat(t.getAttribute('x') || '0') + cur.x - prev.x).toFixed(2));
+          t.setAttribute('y', (parseFloat(t.getAttribute('y') || '0') + cur.y - prev.y).toFixed(2));
+          prev = cur;
+        };
+        const onUp = () => { t.removeEventListener('pointermove', onMove); t.removeEventListener('pointerup', onUp); expandViewBoxIfNeeded(svg); mountBox(box); };
+        t.addEventListener('pointermove', onMove); t.addEventListener('pointerup', onUp);
+      });
+    });
+
+    svg.appendChild(ov);
+  }
+
+  function getSelectedBlockEdges(svg) {
+    if (!svg || !state.selBlock || state.selBlock.length < 3) return [];
+    svg.querySelectorAll('.fig-edit-overlay, .fe-preview').forEach(o => o.remove());
+    const g = buildGraph(svg);
+    const inBlock = nd => state.selBlock.some(s => Math.hypot(s.x - nd.x, s.y - nd.y) <= 2.8);
+    return g.edges.filter(e => inBlock(e.n1) && inBlock(e.n2));
+  }
+
+  function fitDocContent() {
+    document.querySelectorAll('.paper:not(.tab-hidden) .doc').forEach(doc => {
+      const maxW = doc.clientWidth - 4;
+      if (maxW <= 0) return;
+      doc.querySelectorAll('mjx-container[jax="SVG"] svg, .figure-box:not(.fe-zoomed) svg').forEach(svg => {
+        const parent = svg.closest('.step-chain, .solution-step, .question-text, .figure-box, .doc') || doc;
+        const avail = Math.min(maxW, parent.clientWidth || maxW);
+        const rect = svg.getBoundingClientRect();
+        if (avail > 0 && rect.width > avail) {
+          const scale = avail / rect.width;
+          const curW = parseFloat(svg.style.width || rect.width);
+          const curH = parseFloat(svg.style.height || rect.height);
+          if (curW > 0 && curH > 0) { svg.style.width = (curW * scale).toFixed(2) + 'px'; svg.style.height = (curH * scale).toFixed(2) + 'px'; }
+        }
+      });
+    });
+  }
+
+  window.toggleFigEditor = function(force) {
+    state.active = typeof force === 'boolean' ? force : !state.active;
+    state.pendingNode = null; clearSelection();
+    document.body.classList.toggle('fig-edit-active', state.active);
+    const btnEdit = document.getElementById('btn-fig-edit');
+    if (btnEdit) btnEdit.classList.toggle('active', state.active);
+    const bar = document.getElementById('fig-editor-bar');
+    if (bar) bar.classList.toggle('open', state.active);
+    if (state.active) {
+      const boxes = document.querySelectorAll('.figure-box');
+      boxes.forEach(mountBox);
+      const firstVis = document.querySelector('.paper:not(.tab-hidden) .figure-box') || boxes[0];
+      if (firstVis) setActiveBox(firstVis);
+    } else {
+      document.querySelectorAll('.figure-box').forEach(b => { applyBoxZoom(b, 1); b.classList.remove('fe-box-selected'); });
+      document.querySelectorAll('.fig-edit-overlay, .fe-preview').forEach(o => o.remove());
+    }
+  };
+  window.setFigTool = function(t) {
+    state.tool = t; state.pendingNode = null;
+    ['select', 'moveblock', 'drawedge', 'connect', 'addpt', 'copyedge', 'shape'].forEach(id => {
+      const btn = document.getElementById('fe-mode-' + id);
+      if (btn) btn.classList.toggle('fe-on', t === id);
+    });
+    if (state.active) document.querySelectorAll('.figure-box').forEach(mountBox);
+  };
+  window.selectShapeType = function(val) { state.shapeType = val; window.setFigTool('shape'); };
+  window.toggleNewEdgeDash = function() {
+    state.newDash = !state.newDash;
+    const btn = document.getElementById('fe-connect-dash');
+    if (btn) btn.textContent = 'Nét vẽ: ' + (state.newDash ? 'Đứt' : 'Liền');
+  };
+  window.duplicateSelectedBlock = function() {
+    if (!state.selBlock || !state.selBox) return;
+    const box = state.selBox, svg = box.querySelector('svg');
+    if (!svg) return;
+    saveSnapshot(box);
+    const blockEdges = getSelectedBlockEdges(svg), ov = svg.querySelector('.fig-edit-overlay'), off = 18;
+    blockEdges.forEach(e => {
+      const attrs = { x1: (e.p1.x + off).toFixed(2), y1: (e.p1.y + off).toFixed(2), x2: (e.p2.x + off).toFixed(2), y2: (e.p2.y + off).toFixed(2), stroke: e.el.getAttribute('stroke') || '#111111', 'stroke-width': e.el.getAttribute('stroke-width') || '1.5' };
+      const dash = e.el.getAttribute('stroke-dasharray');
+      if (dash && dash !== 'none') attrs['stroke-dasharray'] = dash;
+      svg.insertBefore(el('line', attrs), ov || null);
+    });
+    state.selBlock = state.selBlock.map(p => ({ x: p.x + off, y: p.y + off }));
+    updateSelectionBars(); expandViewBoxIfNeeded(svg); mountBox(box);
+  };
+  window.toggleSelectedBlockDash = function() {
+    if (!state.selBlock || !state.selBox) return;
+    const box = state.selBox, svg = box.querySelector('svg');
+    if (!svg) return;
+    saveSnapshot(box);
+    const blockEdges = getSelectedBlockEdges(svg);
+    if (!blockEdges.length) { mountBox(box); return; }
+    const firstCur = blockEdges[0].el.getAttribute('stroke-dasharray') || getComputedStyle(blockEdges[0].el).strokeDasharray;
+    const makeSolid = firstCur && firstCur !== 'none' && firstCur !== '';
+    blockEdges.forEach(e => {
+      if (makeSolid) { e.el.removeAttribute('stroke-dasharray'); e.el.style.strokeDasharray = 'none'; }
+      else { e.el.setAttribute('stroke-dasharray', '5,4'); e.el.style.strokeDasharray = '5,4'; }
+    });
+    mountBox(box);
+  };
+  window.colorSelectedBlock = function(c) {
+    if (!state.selBlock || !state.selBox) return;
+    const box = state.selBox, svg = box.querySelector('svg');
+    if (!svg) return;
+    saveSnapshot(box);
+    getSelectedBlockEdges(svg).forEach(e => { e.el.setAttribute('stroke', c); e.el.style.stroke = c; });
+    mountBox(box);
+  };
+  window.deleteSelectedBlock = function() {
+    if (!state.selBlock || !state.selBox) return;
+    const box = state.selBox, svg = box.querySelector('svg');
+    if (!svg) return;
+    saveSnapshot(box);
+    const blockEdges = getSelectedBlockEdges(svg), endpoints = [];
+    blockEdges.forEach(e => { endpoints.push([e.p1.x, e.p1.y], [e.p2.x, e.p2.y]); e.el.remove(); });
+    clearSelection();
+    const gAfter = buildGraph(svg);
+    endpoints.forEach(([ex, ey]) => {
+      const orphan = gAfter.nodes.find(nd => Math.hypot(nd.x - ex, nd.y - ey) <= 2.4 && nd.refs.length === 0 && nd.texts.length === 0);
+      if (orphan) orphan.dots.forEach(c => c.remove());
+    });
+    mountBox(box);
+  };
+  window.toggleSelectedEdgeDash = function() {
+    if (!state.selEdge || !state.selBox) return;
+    saveSnapshot(state.selBox);
+    const cur = state.selEdge.getAttribute('stroke-dasharray') || getComputedStyle(state.selEdge).strokeDasharray;
+    if (cur && cur !== 'none' && cur !== '') { state.selEdge.removeAttribute('stroke-dasharray'); state.selEdge.style.strokeDasharray = 'none'; }
+    else { state.selEdge.setAttribute('stroke-dasharray', '5,4'); state.selEdge.style.strokeDasharray = '5,4'; }
+  };
+  window.duplicateSelectedEdge = function() {
+    if (!state.selEdge || !state.selBox) return;
+    const svg = state.selBox.querySelector('svg');
+    if (svg) duplicateElement(svg, state.selEdge, state.selBox);
+  };
+  window.colorSelectedEdge = function(c) {
+    if (!state.selEdge || !state.selBox) return;
+    saveSnapshot(state.selBox);
+    state.selEdge.setAttribute('stroke', c); state.selEdge.style.stroke = c;
+  };
+  window.deleteSelectedEdge = function() {
+    if (!state.selEdge || !state.selBox) return;
+    const box = state.selBox, svg = box.querySelector('svg');
+    saveSnapshot(box);
+    const endpoints = [];
+    if (state.selEdge.tagName.toLowerCase() === 'line') {
+      endpoints.push([+state.selEdge.getAttribute('x1'), +state.selEdge.getAttribute('y1')], [+state.selEdge.getAttribute('x2'), +state.selEdge.getAttribute('y2')]);
+    }
+    state.selEdge.remove(); clearSelection();
+    if (svg && endpoints.length) {
+      svg.querySelectorAll('.fig-edit-overlay, .fe-preview').forEach(o => o.remove());
+      const gAfter = buildGraph(svg);
+      endpoints.forEach(([ex, ey]) => {
+        const orphan = gAfter.nodes.find(nd => Math.hypot(nd.x - ex, nd.y - ey) <= 2.4 && nd.refs.length === 0 && nd.texts.length === 0);
+        if (orphan) orphan.dots.forEach(c => c.remove());
+      });
+    }
+    mountBox(box);
+  };
+  window.deleteSelectedNode = function() {
+    if (!state.selNode || !state.selBox) return;
+    const box = state.selBox, svg = box.querySelector('svg');
+    if (!svg) return;
+    saveSnapshot(box);
+    svg.querySelectorAll('.fig-edit-overlay, .fe-preview').forEach(o => o.remove());
+    const g = buildGraph(svg);
+    const target = g.nodes.find(nd => Math.hypot(nd.x - state.selNode.x, nd.y - state.selNode.y) <= 3.5);
+    if (target) {
+      target.dots.forEach(c => c.remove());
+      target.refs.forEach(r => {
+        if (r.e && r.e.el) r.e.el.remove();
+        if (r.poly && r.poly.el) {
+          if (r.poly.pts.length > 3) { r.poly.pts.splice(r.idx, 1); syncPoly(r.poly); }
+          else r.poly.el.remove();
+        }
+      });
+    }
+    svg.querySelectorAll('circle').forEach(c => {
+      const r = parseFloat(c.getAttribute('r') || '0');
+      if (r > 0 && r <= 6 && Math.hypot(+c.getAttribute('cx') - state.selNode.x, +c.getAttribute('cy') - state.selNode.y) <= 3.5) c.remove();
+    });
+    clearSelection(); mountBox(box);
+  };
+  window.zoomActiveFig = function(delta) {
+    const box = state.activeBox || state.selBox || document.querySelector('.paper:not(.tab-hidden) .figure-box');
+    if (!box) return;
+    applyBoxZoom(box, delta === 0 ? 1 : +(getBoxZoom(box) + delta).toFixed(2));
+  };
+  window.undoFigEdit = function() {
+    const last = state.undo.pop();
+    if (!last) return;
+    const curZoom = getBoxZoom(last.box);
+    last.box.innerHTML = last.html;
+    state.pendingNode = null; clearSelection(); setActiveBox(last.box);
+    if (curZoom !== 1) applyBoxZoom(last.box, curZoom);
+    if (state.active) mountBox(last.box);
+  };
+  window.resetActiveFig = function() {
+    const box = state.activeBox || state.selBox || document.querySelector('.paper:not(.tab-hidden) .figure-box');
+    if (!box || !state.originals.has(box)) return;
+    saveSnapshot(box);
+    box.innerHTML = state.originals.get(box);
+    state.pendingNode = null; clearSelection(); applyBoxZoom(box, 1);
+    if (state.active) mountBox(box);
+  };
+  window.saveEditedHTML = function() {
+    const wasActive = state.active;
+    if (wasActive) toggleFigEditor(false);
+    document.querySelectorAll('.figure-box').forEach(box => { if (box.querySelector('svg')) box.dataset.rendered = '1'; });
+    const clone = document.documentElement.cloneNode(true);
+    clone.querySelectorAll('#fig-editor-bar, #fig-editor-style').forEach(n => n.remove());
+    const html = '<!DOCTYPE html>\n' + clone.outerHTML;
+    triggerDownload(new Blob([html], { type: 'text/html;charset=utf-8' }), safeFileName('_da_sua.html'));
+    if (wasActive) toggleFigEditor(true);
+  };
+  window.downloadPrintHTML = function() {
+    const wasActive = state.active;
+    if (wasActive) toggleFigEditor(false);
+    fitDocContent();
+    const clone = document.documentElement.cloneNode(true);
+    clone.querySelectorAll('.toolbar, #fig-editor-bar, .fig-edit-overlay, .fe-preview, #MathJax-script').forEach(n => n.remove());
+    clone.querySelectorAll('script').forEach(s => { if (!s.src && (s.textContent.includes('Geo.draw') || s.textContent.includes('window.MathJax'))) s.remove(); });
+    clone.querySelectorAll('.paper').forEach(sec => sec.classList.remove('tab-hidden'));
+    const extraStyle = document.createElement('style');
+    extraStyle.textContent = '@media screen{body{background:#f1f5f9;padding:16px}.paper{display:block!important;margin:0 auto 24px auto!important}}@media print{.paper{display:block!important;page-break-after:always;box-shadow:none!important;margin:0!important}.paper:last-of-type{page-break-after:auto}.question-block,.solution-item,.figure-box,.step-chain,.summary-box,.theory-box{break-inside:avoid;page-break-inside:avoid}.section-title,.ans-group-title,.solution-header,.solution-label{break-after:avoid;page-break-after:avoid}}';
+    clone.querySelector('head').appendChild(extraStyle);
+    const html = '<!DOCTYPE html>\n' + clone.outerHTML;
+    triggerDownload(new Blob([html], { type: 'text/html;charset=utf-8' }), safeFileName('_Ban_in.html'));
+    if (wasActive) toggleFigEditor(true);
+  };
+  window.downloadPDF = async function(tab, btn) {
+    if (state.active) toggleFigEditor(false);
+    const prevTab = document.getElementById('tab-solution') && !document.getElementById('tab-solution').classList.contains('tab-hidden') ? 'solution' : 'exam';
+    const origText = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Đang tạo PDF...'; }
+    try {
+      if (typeof window.switchTab === 'function') window.switchTab(tab);
+      await new Promise(r => setTimeout(r, 120));
+      if (window.MathJax && MathJax.typesetPromise) { try { await MathJax.typesetPromise(); } catch (_) {} }
+      fitDocContent();
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+      const sec = document.getElementById('tab-' + tab);
+      const docEl = (sec && sec.querySelector('.doc')) || sec;
+      const jsPDFCtor = window.jspdf && window.jspdf.jsPDF;
+      if (!docEl || !window.htmlToImage || !jsPDFCtor) throw new Error('PDF lib unavailable');
+
+      const docRect = docEl.getBoundingClientRect();
+      const rawBlocks = [];
+      const topEls = Array.from(docEl.querySelectorAll('.exam-header, .section-title, .question-block, .solution-item, .summary-box, .theory-box'));
+      topEls.forEach((node, idx) => {
+        const r = node.getBoundingClientRect();
+        if (r.height <= 0) return;
+        let top = r.top - docRect.top, bottom = r.bottom - docRect.top;
+        if (node.classList.contains('section-title') && idx + 1 < topEls.length) {
+          const nextR = topEls[idx + 1].getBoundingClientRect();
+          if (nextR.height > 0) bottom = Math.max(bottom, nextR.bottom - docRect.top);
+        }
+        rawBlocks.push({ top, bottom });
+      });
+
+      const rawCuts = new Set([0, docRect.height]);
+      docEl.querySelectorAll('p, li, tr, .solution-step, .step-chain, .figure-box, .final-ans, .options-grid > div, .tf-list > div, .short-answer-line, .ans-tf-row, .ans-group-title, .ans-flex, h1, h2').forEach(node => {
+        const r = node.getBoundingClientRect();
+        if (r.height > 0) { rawCuts.add(Math.max(0, r.top - docRect.top - 2)); rawCuts.add(Math.min(docRect.height, r.bottom - docRect.top + 2)); }
+      });
+      try {
+        const walker = document.createTreeWalker(docEl, NodeFilter.SHOW_TEXT, null);
+        const range = document.createRange();
+        let tn;
+        while ((tn = walker.nextNode())) {
+          if (!tn.nodeValue || !tn.nodeValue.trim()) continue;
+          if (tn.parentElement && tn.parentElement.closest('mjx-container, svg, script, style')) continue;
+          range.selectNodeContents(tn);
+          for (const lr of range.getClientRects()) {
+            if (lr.height > 0) { rawCuts.add(Math.max(0, lr.top - docRect.top - 1.5)); rawCuts.add(Math.min(docRect.height, lr.bottom - docRect.top + 1.5)); }
+          }
+        }
+      } catch (_) {}
+
+      const totalH = Math.max(docEl.scrollHeight, docEl.offsetHeight, 100);
+      const ratio = totalH * 2 > 14500 ? 1.35 : 2;
+      const canvas = await window.htmlToImage.toCanvas(docEl, { backgroundColor: '#ffffff', pixelRatio: ratio, skipFonts: true, fontEmbedCSS: '', cacheBust: false });
+
+      const scale = canvas.height / Math.max(docRect.height, 1);
+      const blocks = rawBlocks.map(b => ({ top: b.top * scale, bottom: b.bottom * scale })).sort((a, b) => a.top - b.top);
+      const cuts = Array.from(rawCuts).map(y => y * scale).filter(y => Number.isFinite(y) && y >= 0 && y <= canvas.height).sort((a, b) => a - b);
+
+      const ctxProbe = canvas.getContext('2d', { willReadFrequently: true });
+      const isRowWhite = y => {
+        if (!ctxProbe || y < 0 || y >= canvas.height) return true;
+        try {
+          const data = ctxProbe.getImageData(0, y, canvas.width, 1).data;
+          for (let x = 0; x < data.length; x += 16) { if (data[x] < 246 || data[x + 1] < 246 || data[x + 2] < 246) return false; }
+          return true;
+        } catch (_) { return true; }
+      };
+      const snapWhiteY = (targetY, minY, maxY) => {
+        const t = Math.round(targetY), lo = Math.max(0, Math.round(minY)), hi = Math.min(canvas.height - 1, Math.round(maxY));
+        for (let d = 0; d <= 36; d++) {
+          if (t - d >= lo && isRowWhite(t - d)) return t - d;
+          if (d > 0 && t + d <= hi && isRowWhite(t + d)) return t + d;
+        }
+        return Math.max(lo, Math.min(hi, t));
+      };
+      const hasInk = (y0, y1) => {
+        if (!ctxProbe) return true;
+        const start = Math.max(0, Math.floor(y0)), end = Math.min(canvas.height, Math.ceil(y1));
+        for (let y = start; y < end; y += 3) { if (!isRowWhite(y)) return true; }
+        return false;
+      };
+
+      const pdf = new jsPDFCtor({ orientation: 'p', unit: 'mm', format: 'a4' });
+      const marginX = 10, marginY = 10, pdfW = 210 - marginX * 2, pdfH = 297 - marginY * 2;
+      const pagePxH = Math.floor(canvas.width * (pdfH / pdfW));
+      let offsetY = 0, pageIdx = 0;
+
+      while (offsetY < canvas.height - 4) {
+        if (!hasInk(offsetY, canvas.height)) break;
+        const maxEnd = Math.min(canvas.height, offsetY + pagePxH);
+        let nextY = maxEnd;
+        if (maxEnd < canvas.height - 4) {
+          const minStepY = offsetY + Math.max(48, pagePxH * 0.15);
+          const crossing = blocks.find(b => b.top > offsetY + 6 * scale && b.top < maxEnd && b.bottom > maxEnd);
+          let candidateY = maxEnd;
+          if (crossing && (crossing.bottom - crossing.top) <= pagePxH * 0.96) {
+            candidateY = Math.max(minStepY, crossing.top - 4 * scale);
+          } else {
+            let bestCut = -1;
+            for (let i = 0; i < cuts.length; i++) { if (cuts[i] >= minStepY && cuts[i] <= maxEnd - 2 * scale) bestCut = cuts[i]; }
+            if (bestCut > 0) candidateY = bestCut;
+          }
+          nextY = snapWhiteY(candidateY, minStepY, maxEnd);
+        }
+        const sliceH = Math.max(1, Math.round(nextY - offsetY));
+        const pageCanvas = document.createElement('canvas');
+        pageCanvas.width = canvas.width; pageCanvas.height = sliceH;
+        const ctx = pageCanvas.getContext('2d');
+        ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+        ctx.drawImage(canvas, 0, offsetY, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
+        if (pageIdx > 0) pdf.addPage();
+        pdf.addImage(pageCanvas.toDataURL('image/jpeg', 0.95), 'JPEG', marginX, marginY, pdfW, (sliceH * pdfW) / canvas.width);
+        offsetY += sliceH; pageIdx++;
+      }
+      const prefix = tab === 'exam' ? 'Đề thi - ' : 'Đáp án & Lời giải - ';
+      triggerDownload(pdf.output('blob'), safeFileName('.pdf', prefix));
+    } catch (err) {
+      const prevTitle = document.title;
+      document.title = safeFileName('', tab === 'exam' ? 'Đề thi - ' : 'Đáp án & Lời giải - ');
+      window.print();
+      document.title = prevTitle;
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = origText; }
+      if (prevTab !== tab && typeof window.switchTab === 'function') window.switchTab(prevTab);
+    }
+  };
+
+  function initEditorUI() {
+    if (!document.body) return;
+    if (!document.getElementById('fig-editor-bar')) {
+      document.body.insertAdjacentHTML('beforeend', EDITOR_HTML);
+    }
+    const tb = document.querySelector('.toolbar');
+    if (tb && !document.getElementById('btn-fig-edit')) {
+      const btn = document.createElement('button');
+      btn.id = 'btn-fig-edit';
+      btn.textContent = '✏️ Chỉnh sửa hình';
+      btn.onclick = () => toggleFigEditor();
+      const refBtn = tb.querySelector('.b-exam');
+      tb.insertBefore(btn, refBtn || null);
+    }
+    setTimeout(fitDocContent, 120);
+    if (typeof window.switchTab === 'function' && !window.switchTab._v36Wrapped) {
+      const origSwitch = window.switchTab;
+      window.switchTab = function() {
+        const r = origSwitch.apply(this, arguments);
+        setTimeout(() => {
+          fitDocContent();
+          if (state.active) {
+            const firstVis = document.querySelector('.paper:not(.tab-hidden) .figure-box');
+            if (firstVis) setActiveBox(firstVis);
+          }
+        }, 30);
+        return r;
+      };
+      window.switchTab._v36Wrapped = true;
+    }
+  }
+
+  document.addEventListener('keydown', e => {
+    if (!state.active) return;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undoFigEdit(); }
+    else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
+      if (state.selBlock && state.selBox) { e.preventDefault(); duplicateSelectedBlock(); }
+      else if (state.selEdge && state.selBox) { e.preventDefault(); duplicateSelectedEdge(); }
+    } else if ((e.key === 'Delete' || e.key === 'Backspace') && !['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target && e.target.tagName) || '')) {
+      if (state.selBlock && state.selBox) { e.preventDefault(); deleteSelectedBlock(); }
+      else if (state.selEdge && state.selBox) { e.preventDefault(); deleteSelectedEdge(); }
+      else if (state.selNode && state.selBox) { e.preventDefault(); deleteSelectedNode(); }
+    }
+  });
+
+  if (window.MathJax && MathJax.startup && MathJax.startup.promise) {
+    MathJax.startup.promise.then(() => setTimeout(fitDocContent, 50));
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initEditorUI);
+  else initEditorUI();
+  window.addEventListener('load', initEditorUI);
+})();
