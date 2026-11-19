@@ -2545,17 +2545,47 @@ table{width:100%;max-width:100%!important;table-layout:fixed;word-wrap:break-wor
   setTimeout(initEditorUI, 400);
 })();
 (function () {
+  if (!document.getElementById('ttn-pin-editor-style')) {
+    const st = document.createElement('style');
+    st.id = 'ttn-pin-editor-style';
+    st.textContent = `
+      .ttn-floating-editor, .ttn-floating-editor div {
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+      }
+      .ttn-floating-editor {
+        position: fixed !important;
+        bottom: 16px !important;
+        right: 16px !important;
+        top: auto !important;
+        left: auto !important;
+        z-index: 9999 !important;
+        max-width: 440px !important;
+        color: #334155 !important;
+      }
+      .ttn-floating-editor button, .ttn-floating-editor select {
+        background-color: rgba(255, 255, 255, 0.65);
+        border: 1px solid rgba(148, 163, 184, 0.45);
+        border-radius: 5px;
+      }
+      .ttn-floating-editor button:hover {
+        background-color: rgba(255, 255, 255, 0.92);
+      }
+      @media print { .ttn-floating-editor { display: none !important; } }
+    `;
+    (document.head || document.documentElement).appendChild(st);
+  }
   const pin = () => document.querySelectorAll('body > div').forEach(el => {
     if (el.textContent && el.textContent.includes('Chỉnh sửa & Vẽ hình')) {
-      Object.assign(el.style, {
-        position: 'fixed', top: '58px', right: '16px',
-        left: 'auto', bottom: 'auto', zIndex: '9999',
-        maxWidth: '460px', boxShadow: '0 10px 25px rgba(15,23,42,0.18)'
-      });
+      el.classList.add('ttn-floating-editor');
     }
   });
-  const init = () => new MutationObserver(pin).observe(document.body, {
-    childList: true, subtree: true, attributes: true, attributeFilter: ['style']
-  });
+  const init = () => {
+    pin();
+    new MutationObserver(pin).observe(document.body, {
+      childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class']
+    });
+  };
   document.body ? init() : document.addEventListener('DOMContentLoaded', init);
 })();
